@@ -1,0 +1,22 @@
+{
+  "name": "StatusChecker",
+  "version": "0.1.0",
+  "description": "Check the status of Quickblox data and chat modules",
+  "main": "server.js",
+  "scripts": {
+    "test": "node server.js"
+  },
+  "author": "Alex Bass <alex.bass@quickblox.com>",
+  "license": "MIT",
+  "dependencies": {
+    "chance": "^0.5.9",
+    "colors": "^0.6.2",
+    "cron": "^1.0.4",
+    "express": "^4.8.5",
+    "moment": "^2.8.2",
+    "node-xmpp": "^1.0.0-alpha2",
+    "qbox": "^0.1.7",
+    "quickblox": "^1.2.1",
+    "request": "^2.40.0"
+  }
+}
