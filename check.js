@@ -19,17 +19,17 @@ memwatch.on('leak', function(leak) {
 	console.log(leak);
 });
 
-var instances = config.instances,
+var testingInstance = false,
+	chatCredentials = {},
+	instances = config.instances,
 	status_app = config.status_app,
 	LOG_CHECKS = true;
 
-var table = "TestingClassNode", // name of table to test custom object creation with
-	latency = {},
+var latency = { total: {} },
 	current_instance = 0,
 	error_log = {},
-	misc = {};
-	
-	latency.total = {};
+	misc = {},
+	testingCallback; // Will be a function if testingInstance===true
 
 // This is a map of all the functions to complete.
 // I just thought it was cleaner than referencing
@@ -65,16 +65,24 @@ var order = {
 };
 
 
-function start() {
-	var current = current_instance,
-		app_id = instances[current].app_id,
-		auth_key = instances[current].auth_key,
-		auth_secret = instances[current].auth_secret,
-		endpoint = instances[current].endpoint;
-	
-	QB.init(app_id, auth_key, auth_secret, false);
-	QB.service.qbInst.config.endpoints.api = endpoint;
-	order.first();
+function start(instance, callback) { // instance will be passed if we are doing a test case
+	if(!instance) {
+		var current = current_instance,
+			app_id = instances[current].app_id,
+			auth_key = instances[current].auth_key,
+			auth_secret = instances[current].auth_secret,
+			endpoint = instances[current].endpoint;
+		
+		QB.init(app_id, auth_key, auth_secret, false);
+		QB.service.qbInst.config.endpoints.api = endpoint;
+		order.first();
+	} else {
+		testingInstance = true;
+		var config = instance.credentials;
+		QB.init(config.app_id, config.auth_key, config.auth_secret, false);
+		QB.service.qbInst.config.endpoints.api = config.endpoint;
+		testingCallback = callback;
+	}
 }
 
 function startTime() {
@@ -89,7 +97,7 @@ function getLatency(ts) {
 function failed(module, error) {
     var instance = thisInstance("name");
     var errormsg = {module: module, details: error};
-	
+    	
 	if(typeof error_log[instance] === "undefined") {
     	error_log[instance] = [];
     	error_log[instance].push(errormsg);
@@ -123,37 +131,48 @@ function next(name) {
 }
 
 function end() {
-	if(current_instance+1 === instances.length) {
+	if(!testingInstance) {
+
+		var time = moment().format("DD/MM/YY HH:mm:ss"),
+			instanceName = thisInstance("name");
 		
-		var whole_total = 0;
-		for(var fig in latency.total) {
-			whole_total += latency.total[fig];
-		}
-		
-		console.log(moment().format("DD/MM/YY HH:mm:ss") + " [" + thisInstance("name") + "] Completed checks ("+ latency.total[thisInstance("name")] + "ms)")
-		console.log("Completed all checks in " + whole_total + "ms");
-				
-		if(getErrorLog("length") === 1) {
-			console.log("There was 1 error while checking.");
-			console.log(getErrorLog("json"));
-		} else {
-			console.log("There were " + getErrorLog("length") + " errors while checking.");
-			if(getErrorLog("length") > 0) {
-				console.log(getErrorLog("json"));
+		if(current_instance+1 === instances.length ) {
+			
+			var whole_total = 0;
+			for(var fig in latency.total) {
+				whole_total += latency.total[fig];
 			}
+			
+			console.log(time + " [" + instanceName + "] Completed checks ("+ latency.total[instanceName] + "ms)")
+			console.log("Completed all checks in " + whole_total + "ms");
+					
+			if(getErrorLog("length") === 1) {
+				console.log("There was 1 error while checking.");
+				console.log(getErrorLog("json"));
+			} else {
+				console.log("There were " + getErrorLog("length") + " errors while checking.");
+				if(getErrorLog("length") > 0) {
+					console.log(getErrorLog("json"));
+				}
+			}
+					
+			submitLogs(function() {
+	    		setTimeout(function() {
+	        		reset();
+	        		return;
+	    		}, 5000)
+			});
+			
+		} else {
+		    console.log(time + " [" + instanceName + "] Completed checks ("+ latency.total[instanceName] + "ms)");
+			current_instance++;
+			misc = {};
+			start();
 		}
-				
-		submitLogs(function() {
-    		setTimeout(function() {
-        		reset();
-    		}, 5000)
-		});
-		
-	} else {
-	    console.log(moment().format("DD/MM/YY HH:mm:ss") + " [" + thisInstance("name") + "] Completed checks ("+ latency.total[thisInstance("name")] + "ms)");
-		current_instance++;
-		misc = {};
-		start();
+	} else { // We are testing just one instance
+		testingInstance = false;
+		testingCallback(latency);
+		reset();
 	}
 }
 
@@ -212,7 +231,8 @@ function submitLogs(callback) {
 }
 
 function thisInstance(item) {
-	return (typeof item !== "undefined" ? instances[current_instance][item] : instances[current_instance]);
+	if(!testingInstance) return (typeof item !== "undefined" ? instances[current_instance][item] : instances[current_instance]);
+	else return (typeof item !== "undefined" ? testingInstance[item] : instances[current_instance]);
 }
 
 function reset() {
@@ -220,18 +240,19 @@ function reset() {
 	current_instance = 0;
 	error_log = {};
 	latency.total = {};
+	chatCredentials = {};
+	testingCallback = null;
+	Object.keys(misc).forEach(function(key) {
+		delete misc[key];
+	})
 	misc = {};
-	console.log("{latency} has a length of " + Object.keys(latency).length)
-	if(Object.keys(latency).length > 0) {
-		console.log(latency);
-	}
 }
 
 function timeTo(stat, time) {
 	
-	var instanceName = thisInstance("name");
-
-	var time_now = moment().format("DD/MM/YY HH:mm:ss.SSS");
+	var instanceName = thisInstance("name"),
+		time_now = moment().format("DD/MM/YY HH:mm:ss.SSS");
+	
 	if (time > 0) {
 		if(LOG_CHECKS) console.log(time_now.bold.blue + (" [" + instanceName + "] " + stat.toLowerCase() + " ("+ time + "ms)").yellow);
 	} else if (time === -1) {
@@ -261,54 +282,33 @@ function newName() {
     return chance.name().replace(/ /g, '_');
 }
 
-function user(qb_user) {
-	if (typeof qb_user !== "undefined") misc.qb_user = qb_user;
-	else return misc.qb_user;
+function getTemp(module, field) {
+	if(module && !field && misc[module]) {
+		return misc[module];
+	} else if (module && field && misc[module]) {
+		if(misc[module][field]) {
+			return misc[module][field]
+		} else {
+			return null;
+		}
+	} else {
+		return null;
+	}
 }
 
-function content(id) {
-	if (typeof id !== "undefined") misc.content_id = id;
-	else return misc.content_id || null;
-}
-
-function geo(id) {
-	if (typeof id !== "undefined") misc.geodata_id = id;
-	else return misc.geodata_id || null;
-}
-
-function place(id) {
-	if (typeof id !== "undefined") misc.place_id = id;
-	else return misc.place_id;
-}
-
-function co_data(id) {
-    if(typeof id !== "undefined") {
-    	misc.customobjects_id = id;
-    }
-    else if (typeof misc.customobjects_id !== "undefined" && typeof id === "undefined") {
-    	return { _id: misc.customobjects_id, Hello: "Привет! Меня зовут также Алекс! приятно познакомиться )"};
-    }
-    else if (typeof misc.customobjects_id === "undefined" && typeof id === "undefined") {
-    	return { Hello: "Алло! Меня зовут Алекс." };
-    }
-}
-
-function messages(id) {
-	if (typeof id !== "undefined") misc.messages_id = id;
-	else return misc.messages_id;
-}
-
-function dialog(chat_dialog) {
-	if (typeof chat_dialog !== "undefined") misc.chat_dialog = chat_dialog;
-	else if(typeof chat_dialog === "undefined" && typeof misc.chat_dialog === "undefined") return -1;
-	else return misc.chat_dialog;
+function setTemp(module, record) {
+	if(!module || !record) {
+		return misc = {};
+	} else {
+		misc[module] = record;
+	}
 }
 
 function createSession() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "Create session";
-		
+	var my = {
+		begin: startTime(),
+		name: "Create session" };
+
 	QB.createSession(function(error, response){
 	    if(error) {
 	        failed(my.name, error);
@@ -322,9 +322,10 @@ function createSession() {
 }
 
 function createUser() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "Create user";
+	var my = {
+		begin: startTime(),
+		name: "Create user",
+		module: "user" };
 	
 	QB.users.create({ full_name: chance.name(), login: newName(), password: "password1234" }, function(error, response){
 	    if(error) {
@@ -332,7 +333,7 @@ function createUser() {
 	        my = null;
 	    } else {
 	        timeTo(my.name, getLatency(my.begin));
-	        user(response);
+	        setTemp(my.module, response);
 	        next(my.name);
 	        my = null;
 	    }
@@ -340,11 +341,12 @@ function createUser() {
 }
 
 function createUserSession() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "Create user session";
+	var my = {
+		begin: startTime(),
+		name: "Create user session",
+		module: "user" };
 	
-	QB.createSession({ login: user().login, password: "password1234" }, function(error, response){
+	QB.createSession({ login: getTemp(my.module, "login"), password: "password1234" }, function(error, response){
 	    if(error) {
 	        failed(my.name, error);
 	        my = null;
@@ -357,9 +359,9 @@ function createUserSession() {
 }
 
 function listUsers() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "List users";
+	var my = {
+		begin: startTime(),
+		name: "List users" };
 	
 	QB.users.listUsers(function(error, response){
 	    if(error) {
@@ -374,11 +376,12 @@ function listUsers() {
 }
 
 function updateUser() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "Update user";
+	var my = {
+		begin: startTime(),
+		name: "Update user",
+		module: "user" };
 	
-	QB.users.update(user().id, {website: chance.domain()}, function(error, response){
+	QB.users.update( getTemp(my.module, "id"), { website: chance.domain() }, function(error, response){
 	    if(error) {
 	        failed(my.name, error);
 	        my = null;
@@ -391,11 +394,12 @@ function updateUser() {
 }
 
 function deleteUser() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "Delete user";
+	var my = {
+		begin: startTime(),
+		name: "Delete user",
+		module: "user" };
 	
-	QB.users.delete(user().id, function(error, response){
+	QB.users.delete( getTemp(my.module, "id"), function(error, response){
 	    if(error) {
 	        failed(my.name, error);
 	        my = null;
@@ -408,9 +412,9 @@ function deleteUser() {
 }
 
 function destroySession() {
-    this.begin = startTime();
-    this.name = "Destroy session";
-	var my = this;
+    var my = {
+		begin: startTime(),
+		name: "Destroy session" };
     
     QB.destroySession(function(error, response){
 	    if(error) {
@@ -425,14 +429,16 @@ function destroySession() {
 }
 
 function createNewSession() {
-    this.name = "Create new session";
-	var my = this;
+    var my = {
+		begin: startTime(),
+		name: "Create new session" };
     
     QB.createSession(config.masterLogin, function(error, response){
 	    if(error) {
 	        failed(my.name, error);
 	        my = null;
 	    } else {
+	    	setTemp("session", { token: response.token });
 	        next(my.name);
 	        my = null;
 	    }
@@ -440,9 +446,10 @@ function createNewSession() {
 }
 
 function createGeodata() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "Create geodata";
+	var my = {
+		begin: startTime(),
+		name: "Create geodata",
+		module: "geodata" };
 	
 	QB.location.geodata.create({ latitude: chance.latitude(), longitude: chance.longitude() }, function(error, response){
 	    if(error) {
@@ -450,7 +457,7 @@ function createGeodata() {
 	        my = null;
 	    } else {
 	        timeTo(my.name, getLatency(my.begin));
-	        geo(response.id);
+	        setTemp(my.module, response);
 	        next(my.name);
 	        my = null;
 	    }
@@ -458,17 +465,18 @@ function createGeodata() {
 }
 
 function createPlace() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "Create place";
+	var my = {
+		begin: startTime(),
+		name: "Create place",
+		module: "place" };
 	
-	QB.location.places.create({ geo_data_id: geo(), title: chance.street(), address: chance.address()}, function(error, response){
+	QB.location.places.create({ geo_data_id: getTemp("geodata", "id"), title: chance.street(), address: chance.address()}, function(error, response){
 	    if(error) {
 	        failed(my.name, error);
 	        my = null;
 	    } else {
 	        timeTo(my.name, getLatency(my.begin));
-	        place(response.place.id);
+	        setTemp(my.module, response.place);
 	        next(my.name);
 	        my = null;
 	    }
@@ -476,10 +484,12 @@ function createPlace() {
 }
 
 function deletePlace() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "Delete place";
-	QB.location.places.delete(place(), function(error, response){
+	var my = {
+		begin: startTime(),
+		name: "Delete place",
+		module: "place" };
+	
+	QB.location.places.delete( getTemp(my.module, "id"), function(error, response){
 	    if(error) {
 	        failed(my.name, error);
 	        my = null;
@@ -492,17 +502,18 @@ function deletePlace() {
 }
 
 function createContent() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "Create content";
+	var my = {
+		begin: startTime(),
+		name: "Create content",
+		module: "content" };
 	
-	QB.content.create({name: chance.capitalize(chance.word()), content_type: "image/png", 'public': true}, function(error, response){
+	QB.content.create({ name: chance.capitalize(chance.word()), content_type: "image/png", 'public': true }, function(error, response){
 	    if(error) {
 	        failed(my.name, error);
 	        my = null;
 	    } else {
 	        timeTo(my.name, getLatency(my.begin));
-	        content(response.id);
+	        setTemp(my.module, response);
 	        next(my.name);
 	        my = null;
 	    }
@@ -510,9 +521,10 @@ function createContent() {
 }
 
 function listContent() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "List content";
+	var my = {
+		begin: startTime(),
+		name: "List content",
+		module: "content" };
 	
 	QB.content.list(function(error, response){
 	    if(error) {
@@ -527,11 +539,12 @@ function listContent() {
 }
 
 function deleteContent() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "Delete content";
+	var my = {
+		begin: startTime(),
+		name: "Delete content",
+		module: "content" };
 	
-	QB.content.delete(content(), function(error, response){
+	QB.content.delete( getTemp(my.module, "id"), function(error, response){
 	    if(error) {
 	        failed(my.name, error);
 	        my = null;
@@ -544,17 +557,18 @@ function deleteContent() {
 }
 
 function createData() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "Create data";
+	var my = {
+		begin: startTime(),
+		name: "Create data",
+		module: "data" };
 	
-	QB.data.create(table, co_data(), function(error, response){
+	QB.data.create(config.testingTable, { Hello: chance.sentence() }, function(error, response){
 	    if(error) {
 	        failed(my.name, error);
 	        my = null;
 	    } else {
 	        timeTo(my.name, getLatency(my.begin));
-	        co_data(response._id);
+	        setTemp(my.module, response);
 	        next(my.name);
 	        my = null;
 	    }
@@ -562,11 +576,12 @@ function createData() {
 }
 
 function updateData() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "Update data";
+	var my = {
+		begin: startTime(),
+		name: "Update data",
+		module: "data" };
 		
-	QB.data.update(table, co_data(), function(error, response){
+	QB.data.update(config.testingTable, { _id: getTemp(my.module, "_id"), Hello: chance.sentence() }, function(error, response){
 	    if(error) {
 	        failed(my.name, error);
 	        my = null;
@@ -579,11 +594,11 @@ function updateData() {
 }
 
 function listData() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "List data";
+	var my = {
+		begin: startTime(),
+		name: "List data" };
 	
-	QB.data.list(table, function(error, response){
+	QB.data.list(config.testingTable, function(error, response){
 	    if(error) {
 	        failed(my.name, error);
 	        my = null;
@@ -596,11 +611,12 @@ function listData() {
 }
 
 function deleteData() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "Delete data";
+	var my = {
+		begin: startTime(),
+		name: "Delete data",
+		module: "data" };
 	
-	QB.data.delete(table, co_data()._id, function(error, response){
+	QB.data.delete(config.testingTable, getTemp(my.module, "_id"), function(error, response){
 	    if(error) {
 	        failed(my.name, error);
 	        my = null;
@@ -613,17 +629,18 @@ function deleteData() {
 }
 
 function createPush() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "Create push";
+	var my = {
+		begin: startTime(),
+		name: "Create push",
+		module: "messages" };
 		
-	QB.messages.tokens.create({environment: "development", client_identification_sequence: "144", platform: "ios", udid: "2b6f0cc904d137be2e1730235f5664094b831186"}, function(error, response){
+	QB.messages.tokens.create({environment: "development", client_identification_sequence: "144", platform: "ios", udid: chance.apple_token() }, function(error, response){
 	    if (error) {
 	        failed(my.name, error);
 	        my = null;
 	    } else {
             timeTo(my.name, getLatency(my.begin));
-            messages(response.id);
+            setTemp(my.module, response);
 	        next(my.name);
 	        my = null;
 	    }
@@ -631,11 +648,12 @@ function createPush() {
 }
 
 function deletePush() {
-	var my = {};
-	my.begin = startTime();
-	my.name = "Delete push";
+	var my = {
+		begin: startTime(),
+		name: "Delete push",
+		module: "messages" };
 		
-	QB.messages.tokens.delete(messages(), function(error, response){
+	QB.messages.tokens.delete( getTemp(my.module, "id"), function(error, response){
 	    if (error) {
 	        failed(my.name, error);
 	        my = null;
@@ -648,9 +666,10 @@ function deletePush() {
 }
 
 function createDialog() {
-	var my = {};
-	my.begin = 0;
-	my.name = "Create dialog";	
+	var my = {
+		begin: 0,
+		name: "Create dialog",
+		module: "chat" };
 	
 	if(thisInstance("chat_enabled") === false || thisInstance("chat_v2") === false) {
 		moduleDisabled(my.name);
@@ -659,12 +678,10 @@ function createDialog() {
 		var chat_users = config.xmpp[thisInstance("name")],
 			endpoint = thisInstance("endpoint");
 		
-		console.log("setting headers on request to https://" + endpoint + "/chat/Dialog.json");
-		
 		var options = {
 			url: "https://" + endpoint + "/chat/Dialog.json",
 			headers: {
-				"QB-Token": QB.service.qbInst.session.token
+				"QB-Token": getTemp("session", "token")
 			},
 			json: {
 				occupants_ids: [chat_users.sender.jid.split("-")[0], chat_users.recipient.jid.split("-")[0]].toString(),
@@ -672,15 +689,18 @@ function createDialog() {
 				type: 2
 			}
 		};
-			
+		
+		console.log("setting headers on request to " + options.url); // Just for logs to fit in with the other modules :(
 		my.begin = startTime();
+		
 		request.post(options, function(error, response, body) {
 			if(!error && typeof body.xmpp_room_jid !== "undefined") {
-				dialog(body);
+				setTemp(my.module, body);
 				timeTo(my.name, getLatency(my.begin));
 				next(my.name);
 			} else {
-				if(error === null || typeof error === "undefined") {error="Empty response"}
+				if(error === null || typeof error === "undefined" && response.body && response.body.errors) { error=JSON.stringify(response.body.errors); };
+				setTemp(my.module, -1);
 				failed(my.name, error.toString());
 			}
 		});
@@ -688,13 +708,14 @@ function createDialog() {
 }
 
 function privateChat() {
-	var my = {}, 
+	var my = {
+		latency: 0,
+		name: "Private chat",
+		module: "chat" },
+
 		current_xmpp = config.xmpp[thisInstance("name")],
 		message_hash = chance.hash(),
 		sender, receiver, listeners, sendMessage, onChat;
-		
-	my.latency = 0;
-	my.name = "Private chat";
 	
 	var isbb = (thisInstance("chat_enabled") === "BabyBundle");
 	
@@ -765,17 +786,25 @@ function privateChat() {
 }
 
 function groupChat() {
-	var my = {}, current_xmpp = config.xmpp[thisInstance("name")], sender, receiver, listeners, message_hash = chance.hash(), sendMessage, onStanza, senderStanza, presence_count = 0;
-	my.latency = 0;
-	my.name = "Group chat";
+	var my = {
+		latency: 0,
+		name: "Group chat",
+		module: "chat" },
+
+		current_xmpp = config.xmpp[thisInstance("name")],
+		sender, receiver, listeners, sendMessage, onStanza, senderStanza,
+		message_hash = chance.hash(),
+		presence_count = 0;
 	
-	if(thisInstance("chat_enabled") === false || thisInstance("chat_v2") === false) {
+	if( thisInstance("chat_enabled") === false || thisInstance("chat_v2") === false ) {
 		moduleDisabled(my.name);
-	} else if (dialog() === -1) { // the dialog() method will return -1 if the previous dialog creation method failed
+	}
+	else if ( getTemp(my.module) === -1 ) { // the dialog() method will return -1 if the previous dialog creation method failed
 		failed(my.name, "Could not test group chat due to dialog creation failure.");
-	} else {
+	}
+	else {
 		
-		var room_jid = dialog().xmpp_room_jid;
+		var room_jid = getTemp(my.module, "xmpp_room_jid");
 		
 		var kill = function(reason) {
 			receiver.disconnect();
@@ -814,7 +843,7 @@ function groupChat() {
 				var timeReceived = Date.now(),
 					passed;
 				
-				stanza = stanza.children[0].children[0];
+				stanza = stanza.children[0].children[0].toString();
 				
 				clearTimeout(my.self_destruct);
 				
@@ -851,13 +880,15 @@ function groupChat() {
 }
 
 function retrieveDialogs() {
-	var my = {};
-	my.begin = 0;
-	my.name = "Retrieve dialogs";	
+	var my = {
+		begin: 0,
+		name: "Retrieve dialogs",
+		module: "chat" };	
 	
-	if(thisInstance("chat_enabled") === false || thisInstance("chat_v2") === false) {
+	if( thisInstance("chat_enabled") === false || thisInstance("chat_v2") === false ) {
 		moduleDisabled(my.name);
-	} else {
+	}
+	else {
 		
 		var endpoint = thisInstance("endpoint");
 		
@@ -866,7 +897,7 @@ function retrieveDialogs() {
 		var options = {
 			url: "https://" + endpoint + "/chat/Dialog.json",
 			headers: {
-				"QB-Token": QB.service.qbInst.session.token
+				"QB-Token": getTemp("session", "token")
 			},
 			json: {
 				limit: 1
@@ -879,7 +910,7 @@ function retrieveDialogs() {
 				timeTo(my.name, getLatency(my.begin));
 				next(my.name);
 			} else {
-				if(error === null || typeof error === "undefined") {error="Empty response"}
+				if(error === null || typeof error === "undefined" && response.body && response.body.errors) { error=JSON.stringify(response.body.errors); };
 				failed(my.name, error.toString());
 			}
 		});
@@ -887,26 +918,29 @@ function retrieveDialogs() {
 }
 
 function removeDialogOccupant() {
-	var my = {};
-	my.begin = 0;
-	my.name = "Remove dialog occupant";
+	var my = {
+		begin: 0,
+		name: "Remove dialog occupant",
+		module: "chat" };
 	
 	if(thisInstance("chat_enabled") === false || thisInstance("chat_v2") === false) {
 		moduleDisabled(my.name);
-	} else if (dialog() === -1) { // the dialog() method will return -1 if the previous dialog creation method failed
+	}
+	else if (getTemp(my.module) === -1) { // the dialog() method will return -1 if the previous dialog creation method failed
 		failed(my.name, "Could not '" + my.name + "' due to dialog creation failure.");
-	} else {
+	}
+	else {
 		
 		var	endpoint 	= thisInstance("endpoint"),
-			dialog_id 	= dialog()._id,
-			user1		= dialog().occupants_ids[0]; // ID of user to remove
+			dialog_id 	= getTemp(my.module, "_id"),
+			user1		= getTemp(my.module, "occupants_ids")[0]; // ID of user to remove
 				
 		console.log("setting headers on request to https://" + endpoint + "/chat/Dialog.json");
 	
 		var options = {
 			url: "https://" + endpoint + "/chat/Dialog/" + dialog_id + ".json",
 			headers: {
-				"QB-Token": QB.service.qbInst.session.token
+				"QB-Token": getTemp("session", "token")
 			},
 			json: {
 				pull_all: {
@@ -921,7 +955,7 @@ function removeDialogOccupant() {
 				timeTo(my.name, getLatency(my.begin));
 				next(my.name);
 			} else {
-				if(error === null || typeof error === "undefined" || error == "") {error="Empty response"}
+				if(error === null || typeof error === "undefined" && response.body && response.body.errors) { error=JSON.stringify(response.body.errors); };
 				failed(my.name, error.toString());
 			}
 		});
@@ -929,26 +963,29 @@ function removeDialogOccupant() {
 }
 
 function addDialogOccupant() {
-	var my = {};
-	my.begin = 0;
-	my.name = "Add dialog occupant";
+	var my = {
+		begin: 0,
+		name: "Add dialog occupant",
+		module: "chat" };
 	
 	if(thisInstance("chat_enabled") === false || thisInstance("chat_v2") === false) {
 		moduleDisabled(my.name);
-	} else if (dialog() === -1) { // the dialog() method will return -1 if the previous dialog creation method failed
+	}
+	else if (getTemp(my.module) === -1) { // the dialog() method will return -1 if the previous dialog creation method failed
 		failed(my.name, "Could not '" + my.name + "' due to dialog creation failure.");
-	} else {
+	}
+	else {
 	
 		var	endpoint 	= thisInstance("endpoint"),
-			dialog_id 	= dialog()._id,
-			user1		= dialog().occupants_ids[0]; // ID of user to remove
+			dialog_id 	= getTemp(my.module, "_id"),
+			user1		= getTemp(my.module, "occupants_ids")[0]; // ID of user to add
 				
 		console.log("setting headers on request to https://" + endpoint + "/chat/Dialog.json");
 	
 		var options = {
 			url: "https://" + endpoint + "/chat/Dialog/" + dialog_id + ".json",
 			headers: {
-				"QB-Token": QB.service.qbInst.session.token
+				"QB-Token": getTemp("session", "token")
 			},
 			json: {
 				push_all: {
@@ -963,7 +1000,7 @@ function addDialogOccupant() {
 				timeTo(my.name, getLatency(my.begin));
 				next(my.name);
 			} else {
-				if(error === null || typeof error === "undefined" || error == "") {error="Empty response"}
+				if(error === null || typeof error === "undefined" && response.body && response.body.errors) { error=JSON.stringify(response.body.errors); };
 				failed(my.name, error.toString());
 			}
 		});
