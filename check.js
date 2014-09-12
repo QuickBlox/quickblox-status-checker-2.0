@@ -31,6 +31,7 @@ var latency = { total: {} },
 	misc = {},
 	testingCallback; // Will be a function if testingInstance===true
 
+
 // This is a map of all the functions to complete.
 // I just thought it was cleaner than referencing
 // the next function in each checker.
