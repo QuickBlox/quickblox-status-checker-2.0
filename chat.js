@@ -27,13 +27,13 @@
  
 /*
 
-	This is a modified version of Node Simple XMPP (https://github.com/simple-xmpp/node-simple-xmpp)
-	The changes are too small to create a fork, and the use case is too specific. They also deviate
-	from the original purpose of the module, so not point in publishing.
-	
-	Changes:
-	 * Changed "send" method to allow more flexibility.
-	 * Removed a few other methods that I don't need.
+    This is a modified version of Node Simple XMPP (https://github.com/simple-xmpp/node-simple-xmpp)
+    The changes are too small to create a fork, and the use case is too specific. They also deviate
+    from the original purpose of the module, so not point in publishing.
+    
+    Changes:
+     * Changed "send" method to allow more flexibility.
+     * Removed a few other methods that I don't need.
  
  */
 
@@ -56,43 +56,43 @@ var STATUS = {
 var NS_CHATSTATES = "http://jabber.org/protocol/chatstates";
 
 var listener_defaults = {
-	online: function() {
-		console.log("Connected.");
-	},
-	chat: function(from, message) {
-		console.log(from.yellow + ": " + message.blue);
-	},
-	stanza: function(stanza) {
-		console.log(stanza.root().toString().green);
-	},
-	error: function(error) {
-		console.log((error).red);
-	}
+    online: function() {
+        console.log("Connected.");
+    },
+    chat: function(from, message) {
+        console.log(from.yellow + ": " + message.blue);
+    },
+    stanza: function(stanza) {
+        console.log(stanza.root().toString().green);
+    },
+    error: function(error) {
+        console.log((error).red);
+    }
 };
 
 module.exports = function(user) {
-	this.client = new SimpleXMPP();
-	
-	if(typeof user.on !== "object")
-	user.on = {};
-	
-	if(user.defaults !== false) {
-		for(var listener in listener_defaults) {
-			this.client.on(listener, (typeof user.on[listener] === "function" ? user.on[listener] : listener_defaults[listener]));
-		}
-	} else {
-		for(var listener in user.on) {
-			this.client.on(listener, user.on[listener]);
-		}
-	}
-	
-	this.client.on('error', function(error) {
-		console.log("ERROR!".red);
-		console.log(error);
-	});
-	
-	this.client.connect(user.credentials);
-	return this.client;
+    this.client = new SimpleXMPP();
+    
+    if(typeof user.on !== "object")
+    user.on = {};
+    
+    if(user.defaults !== false) {
+        for(var listener in listener_defaults) {
+            this.client.on(listener, (typeof user.on[listener] === "function" ? user.on[listener] : listener_defaults[listener]));
+        }
+    } else {
+        for(var listener in user.on) {
+            this.client.on(listener, user.on[listener]);
+        }
+    }
+    
+    this.client.on('error', function(error) {
+        console.log("ERROR!".red);
+        console.log(error);
+    });
+    
+    this.client.connect(user.credentials);
+    return this.client;
 };
 
 function SimpleXMPP() {
@@ -120,44 +120,44 @@ function SimpleXMPP() {
 
     this.events = events;
     this.conn = conn;
-    	
+        
     this.send = function(params) {
-				
+                
         $.ready(function() {
         
             var stanza = new xmpp.Element('message', {
-            	xmlns: 'jabber:client', 
-            	id: ~(new Date().getTime()/443), 
-            	to: params.to, 
-            	type: (params.group ? 'groupchat' : 'chat')
+                xmlns: 'jabber:client', 
+                id: ~(new Date().getTime()/443), 
+                to: params.to, 
+                type: (params.group ? 'groupchat' : 'chat')
             });
             
-            	stanza.c('body', { xmlns : 'jabber:client' }).t(params.message);
+                stanza.c('body', { xmlns : 'jabber:client' }).t(params.message);
             
             var extraParams = stanza.c('extraParams', {xmlns : 'jabber:client'});
-            	extraParams.c("date_sent").t(~~(Date.now()/1000));
+                extraParams.c("date_sent").t(~~(Date.now()/1000));
             
             if(params.history) {
-	            extraParams.c("save_to_history").t("1");
+                extraParams.c("save_to_history").t("1");
             }            
             
             if(params.extra) {
-	            Object.keys(params.extra).forEach( function(field) {
-			    	extraParams.c(field).t(params.extra[field]);
-			    });
+                Object.keys(params.extra).forEach( function(field) {
+                    extraParams.c(field).t(params.extra[field]);
+                });
             }
             
             conn.send(stanza);
             
             if(params.debug) {
-            	console.log(stanza.root().toString().red)
+                console.log(stanza.root().toString().red)
             }
         });
     };
 
     this.join = function(to) {
-		var room = to.split('/')[0];
-		
+        var room = to.split('/')[0];
+        
         $.ready(function() {
             if(!joinedRooms[room]){
                 joinedRooms[room] = true;
@@ -167,7 +167,7 @@ function SimpleXMPP() {
             conn.send(stanza);
         });
         
-		return room;
+        return room;
     };
 
     this.subscribe = function(to) {
@@ -275,26 +275,26 @@ function SimpleXMPP() {
     //
     
     
-	this.disconnect = function() {
-		$.ready(function() {
-			var stanza = new xmpp.Element('presence', { type: 'unavailable' });
-			stanza.c('status').t('Logged out');
-			conn.send(stanza);
-		});
-			
-		var ref = this.conn.connection;
-		if (ref.socket.writable) {
-			if (ref.streamOpened) {
-				ref.socket.write('</stream:stream>');
-				delete ref.streamOpened;
-			} else {
-				ref.socket.end();
-			}
-			ref.socket.destroy();
-		}
-	};
-	
-	
+    this.disconnect = function() {
+        $.ready(function() {
+            var stanza = new xmpp.Element('presence', { type: 'unavailable' });
+            stanza.c('status').t('Logged out');
+            conn.send(stanza);
+        });
+            
+        var ref = this.conn.connection;
+        if (ref.socket.writable) {
+            if (ref.streamOpened) {
+                ref.socket.write('</stream:stream>');
+                delete ref.streamOpened;
+            } else {
+                ref.socket.end();
+            }
+            ref.socket.destroy();
+        }
+    };
+    
+    
     this.connect = function(params) {
 
         config = params;
@@ -305,11 +305,11 @@ function SimpleXMPP() {
             $.stop();
             events.emit('close');
         });
-		
-		self.conn.connection.socket.on('error', function() {
-			console.error.bind(console, 'SocketError:');
-		});
-		
+        
+        self.conn.connection.socket.on('error', function() {
+            console.error.bind(console, 'SocketError:');
+        });
+        
         conn.on('online', function(){
             if(! config.skipPresence) {
                 conn.send(new xmpp.Element('presence'));

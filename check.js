@@ -1,1011 +1,1039 @@
 'use strict';
 
-var QB       	= require("quickblox"),
-	request		= require("request"),
-	moment 		= require("moment"),
-	config	 	= require("./config"),
-	chance      = require("chance").Chance(),
-	colors		= require("colors"),
-	ChatUser	= require("./chat"),
-	memwatch	= require("memwatch");
-	
-require('nodetime').profile({
-	accountKey: '',
-	appName: 'Status checker runner'
-});
+var config      = require("./config"),
+    ChatUser    = require("./chat"),
+    helpers     = require("./helpers"),
+    alert       = require("./alerts"),
+    util        = require("util"),
+    QuickBlox   = require("quickblox"),
+    request     = require("request"),
+    chance      = require("chance").Chance(),
+    colors      = require("colors");
 
-memwatch.on('leak', function(leak) {
-	console.log("Leak detected.");
-	console.log(leak);
-});
-
-var testingInstance = false,
-	chatCredentials = {},
-	instances = config.instances,
-	status_app = config.status_app,
-	LOG_CHECKS = true;
+var status_app = config.status_app,
+    LOG_CHECKS = false,
+    abort = false;
 
 var latency = { total: {} },
-	current_instance = 0,
-	error_log = {},
-	misc = {},
-	testingCallback; // Will be a function if testingInstance===true
+    current_instance = 0,
+    error_log = {};
 
 
 // This is a map of all the functions to complete.
 // I just thought it was cleaner than referencing
-// the next function in each checker.
-var order = {
-    first:                  createSession,
-	create_session: 		createUser,
-	create_user: 			createUserSession,
-	create_user_session: 	listUsers,
-	list_users: 			updateUser,
-	update_user:            deleteUser,
-	delete_user:            destroySession,
-	destroy_session:        createNewSession,
-	create_new_session:     createGeodata,
-	create_geodata:         createPlace,
-	create_place:           deletePlace,
-	delete_place:           createContent,
-	create_content:			listContent,
-	list_content:			deleteContent,
-	delete_content:			createData,
-	create_data:            updateData,
-	update_data:            listData,
-	list_data:              deleteData,
-	delete_data:            createPush,
-	create_push:            deletePush,
-	delete_push:            createDialog,
-	create_dialog:			privateChat,
-	private_chat:			groupChat,
-	group_chat:				retrieveDialogs,
-	retrieve_dialogs:		removeDialogOccupant,
-	remove_dialog_occupant:	addDialogOccupant,
-	add_dialog_occupant:	end
+// the next status.after each check.
+
+var order = ["createSession", "createUser", "createUserSession", "listUsers", "updateUser", "deleteUser", "destroySession", "createNewSession", "createGeodata", "createPlace", "deletePlace", "createContent", "listContent", "deleteContent", "createData", "updateData", "listData", "deleteData", "createPush", "deletePush", "createDialog", "privateChat", "groupChat", "retrieveDialogs", "removeDialogOccupant", "addDialogOccupant", "end"];
+
+function Check(instance, options, callback) {
+    
+    // Instance will one object
+    // { name: "QuickbloxStarter", app_id: ... }
+    
+    this.QB = new QuickBlox();
+    
+    this.instance = instance;
+    
+    this.options = options || {};
+    
+    if(callback) this.callback = callback;
+    else this.callback = function(){};
+    
+    this.latency = {};
+    this.total = 0;
+    this.errors = [];
+    this.data = {};
+    
+    this.abort = false;
+    
+    this.stop = function() {
+        abort = true;
+    };
+    
+    this.get = function(module, field) {
+        if(module && !field && this.data[module]) {
+            return this.data[module];
+        } else if (module && field && this.data[module]) {
+            if(this.data[module][field]) {
+                return this.data[module][field]
+            } else {
+                return null;
+            }
+        } else {
+            return null;
+        }
+    };
+
+    this.set = function(module, record) {
+        if(!module || !record) {
+            return this.data = {};
+        } else {
+            this.data[module] = record;
+        }
+    };
+    
+    this.timeto = function(stat, latency) {
+        var name = this.instance.name,
+            time = helpers.time("DD/MM/YY HH:mm:ss"),
+            stat = stat.toLowerCase(),
+            unit, latencyObject;
+    
+        if (latency > 0) unit = latency + "ms";
+        else if (latency === -1) unit = "disabled";
+        else unit = "failed";
+    
+        if(LOG_CHECKS) console.log("%s [%s] %s (%s)", time, name, stat, unit);
+    
+        stat = helpers.safeName(stat);
+        
+        this.latency[stat] = latency;
+        this.total += latency;
+
+        return this;
+    };
+    
+    this.failed = function(module, error) {
+        var instance = this.instance.name;
+        var errormsg = { module: module, details: error };
+        console.log(error);
+        this.errors.push(errormsg);
+
+        this.timeto(module, 0);
+        this.next(module);
+        return this;
+    };
+    
+    this.disabled = function(module) {
+        this.timeto(module, -1);
+        this.next(module);
+        return this;
+    };
+    
+    this.end = function() {
+
+        var time = helpers.time("DD/MM/YY HH:mm:ss"),
+            check = this;
+
+        if(!check.options.quiet && check.instance.email_alerts !== false && check.errors.length > 0) {
+            alert(check.instance.name, { latency: check.latency, errors: check.errors }, function(error, response) {
+                if(!error) console.log("%s: Sent an error email for %s.", time, check.name);
+            });
+            console.log("Would have sent an alert.");
+        }
+        
+        if(!check.options.quiet) {
+            sendlogs(check, function() {
+                console.log("%s [%s] Completed checks (total: %sms)".green, time, check.instance.name, check.total);
+                check.callback({latency: check.latency, errors: check.errors, total: check.total});
+            });
+        }
+        
+        if(check.options.quiet) {
+            check.callback({latency: check.latency, errors: check.errors, total: check.total});
+        }
+    };
+    
+    this.next = function(name) {
+        if(!this.abort) {
+            var next_func = 0;
+            name = helpers.camel(helpers.safeName(name));
+            for(var i = 0, len = order.length; i < len; ++i) {
+                if(order[i] === name) next_func = i + 1;
+            }
+            (order[next_func] !== "end" ? status : this)[order[next_func]](this);
+        } else {
+            this.abort = false;
+            console.log("Request was aborted".red);
+            this.callback(-1);
+        }
+    };
+    
+    this.init = function() {
+        var check = this;
+        this.QB.init(this.instance.app_id, this.instance.auth_key, this.instance.auth_secret, false);
+        this.QB.service.qbInst.config.endpoints.api = this.instance.endpoint;
+        setTimeout(function() {status[order[0]](check);}, 1000);
+    };
+    
+    this.init();
+}
+
+function sendlogs(check, callback) {
+    
+    var QB = new QuickBlox();
+    
+    QB.init(status_app.app_id, status_app.auth_key, status_app.auth_secret, false);
+    QB.service.qbInst.config.endpoints.api = status_app.endpoint;
+
+    QB.createSession(status_app.login, function(error, response){
+        if(!error) {
+
+            var params = {
+                logs: JSON.stringify(check.latency),
+                errors: (check.errors.length !== 0 ? JSON.stringify(check.errors) : null),
+                total_latency: check.total,
+                hours: helpers.time("HH"),
+                minutes: helpers.time("mm")
+            };
+            
+            QB.data.create(check.instance.name, params, function(error, response){
+                if (!error) {
+                    console.log(("Sent logs for " + check.instance.name));
+                    callback();
+                } else {
+                    console.log(("Failed to send logs for " + check.instance.name).red);
+                    console.log(error);
+                }
+            });
+
+        } else {
+            console.log("Couldn't send logs. Will try next time.");
+        }
+    });
+}
+
+function RequestTimeout(name, check) {
+    this.start = setTimeout(function() {
+        check.failed(name, "Request timed out after " + config.global_timeout / 1000 + " seconds.");
+    }, config.global_timeout);
+    this.end = function() {
+        clearTimeout(this.start);
+    };
 };
 
+var status = {};
 
-function start(instance, callback) { // instance will be passed if we are doing a test case
-	if(!instance) {
-		var current = current_instance,
-			app_id = instances[current].app_id,
-			auth_key = instances[current].auth_key,
-			auth_secret = instances[current].auth_secret,
-			endpoint = instances[current].endpoint;
-		
-		QB.init(app_id, auth_key, auth_secret, false);
-		QB.service.qbInst.config.endpoints.api = endpoint;
-		order.first();
-	} else {
-		testingInstance = true;
-		var config = instance.credentials;
-		QB.init(config.app_id, config.auth_key, config.auth_secret, false);
-		QB.service.qbInst.config.endpoints.api = config.endpoint;
-		testingCallback = callback;
-	}
+status.createSession = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Create session" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.createSession(function(error, response){
+        my.timeout.end();
+        if(error) {
+            console.log("error");
+            console.log(error);
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin)).next(my.name);
+            my = null;
+        }
+    });
 }
 
-function startTime() {
-	return Date.now();
+status.createUser = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Create user",
+        module: "user" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.users.create({ full_name: chance.name(), login: helpers.newName(), password: "password1234" }, function(error, response){
+        my.timeout.end();
+        if(error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.set(my.module, response);
+            check.next(my.name);
+            my = null;
+        }
+    });
 }
 
-function getLatency(ts) {
-	var now = Date.now();
-	return now-ts;
+status.createUserSession = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Create user session",
+        module: "user" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.createSession({ login: check.get(my.module, "login"), password: "password1234" }, function(error, response){
+        my.timeout.end();
+        if(error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.next(my.name);
+            my = null;
+        }
+    });
 }
 
-function failed(module, error) {
-    var instance = thisInstance("name");
-    var errormsg = {module: module, details: error};
-    	
-	if(typeof error_log[instance] === "undefined") {
-    	error_log[instance] = [];
-    	error_log[instance].push(errormsg);
-	} else {
-    	error_log[instance].push(errormsg);
-	}
-	
-	timeTo(module, 0);
-	next(module);
+status.listUsers = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "List users" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.users.listUsers(function(error, response){
+        my.timeout.end();
+        if(error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.next(my.name);
+            my = null;
+        }
+    });
 }
 
-function moduleDisabled(module) {
-    var instance = thisInstance("name");
-	timeTo(module, -1);
-	next(module);
+status.updateUser = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Update user",
+        module: "user" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.users.update( check.get(my.module, "id"), { website: chance.domain() }, function(error, response){
+        my.timeout.end();
+        if(error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.next(my.name);
+            my = null;
+        }
+    });
 }
 
-function getErrorLog(return_type) {
-	if(return_type === "json") {
-		return JSON.stringify(error_log);
-	} else if (return_type === "length") {
-		return Object.keys(error_log).length;
-	} else {
-		return error_log;
-	}
+status.deleteUser = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Delete user",
+        module: "user" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.users.delete( check.get(my.module, "id") || 0, function(error, response){
+        my.timeout.end();
+        if(error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.next(my.name);
+            my = null;
+        }
+    });
 }
 
-function next(name) {
-    name = name.toLowerCase().replace(/ /g, '_');
-	order[name]();
+status.destroySession = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Destroy session" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.destroySession(function(error, response){
+        my.timeout.end();
+        if(error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.set("session", -1);
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.next(my.name);
+            my = null;
+        }
+    });
 }
 
-function end() {
-	if(!testingInstance) {
+status.createNewSession = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Create new session" };
 
-		var time = moment().format("DD/MM/YY HH:mm:ss"),
-			instanceName = thisInstance("name");
-		
-		if(current_instance+1 === instances.length ) {
-			
-			var whole_total = 0;
-			for(var fig in latency.total) {
-				whole_total += latency.total[fig];
-			}
-			
-			console.log(time + " [" + instanceName + "] Completed checks ("+ latency.total[instanceName] + "ms)")
-			console.log("Completed all checks in " + whole_total + "ms");
-					
-			if(getErrorLog("length") === 1) {
-				console.log("There was 1 error while checking.");
-				console.log(getErrorLog("json"));
-			} else {
-				console.log("There were " + getErrorLog("length") + " errors while checking.");
-				if(getErrorLog("length") > 0) {
-					console.log(getErrorLog("json"));
-				}
-			}
-					
-			submitLogs(function() {
-	    		setTimeout(function() {
-	        		reset();
-	        		return;
-	    		}, 5000)
-			});
-			
-		} else {
-		    console.log(time + " [" + instanceName + "] Completed checks ("+ latency.total[instanceName] + "ms)");
-			current_instance++;
-			misc = {};
-			start();
-		}
-	} else { // We are testing just one instance
-		testingInstance = false;
-		testingCallback(latency);
-		reset();
-	}
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.createSession(config.masterLogin, function(error, response){
+        my.timeout.end();
+        if(error) {
+            console.log("New session creation failed".red);
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.set("session", { token: response.token });
+            check.next(my.name);
+            my = null;
+        }
+    });
 }
 
-function submitLogs(callback) {
-	QB.init(status_app.app_id, status_app.auth_key, status_app.auth_secret, false);
-	QB.service.qbInst.config.endpoints.api = status_app.endpoint;
-	QB.createSession({login: "logbot", password: "logbot00"}, function(error, response){
-	    if(!error) {
-	        
-	        var currentLogsInstance = 0,
-	        	numberOfInstances = instances.length,
-	        	sendLogs;
-	        
-	        sendLogs = function() {
-		        var errors = null;
-                if(error_log[instances[currentLogsInstance].name] !== "undefined" && error_log[instances[currentLogsInstance].name] !== null)
-                errors = JSON.stringify(error_log[instances[currentLogsInstance].name]);
-                
-                var log = {
-                    logs: JSON.stringify(latency[instances[currentLogsInstance].name]),
-                    errors: errors,
-                    total_latency: latency.total[instances[currentLogsInstance].name],
-                    hours: moment().format("HH"),
-                    minutes: moment().format("mm")
+status.createGeodata = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Create geodata",
+        module: "geodata" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.location.geodata.create({ latitude: chance.latitude(), longitude: chance.longitude() }, function(error, response){
+        my.timeout.end();
+        if(error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.set(my.module, response);
+            check.next(my.name);
+            my = null;
+        }
+    });
+}
+
+status.createPlace = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Create place",
+        module: "place" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.location.places.create({ geo_data_id: check.get("geodata", "id"), title: chance.street(), address: chance.address()}, function(error, response){
+        my.timeout.end();
+        if(error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.set(my.module, response.place);
+            check.next(my.name);
+            my = null;
+        }
+    });
+}
+
+status.deletePlace = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Delete place",
+        module: "place" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.location.places.delete( check.get(my.module, "id"), function(error, response){
+        my.timeout.end();
+        if(error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.next(my.name);
+            my = null;
+        }
+    });
+}
+
+status.createContent = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Create content",
+        module: "content" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.content.create({ name: chance.capitalize(chance.word()), content_type: "image/png", 'public': true }, function(error, response){
+        my.timeout.end();
+        if(error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.set(my.module, response);
+            check.next(my.name);
+            my = null;
+        }
+    });
+}
+
+status.listContent = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "List content",
+        module: "content" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.content.list(function(error, response){
+        my.timeout.end();
+        if(error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.next(my.name);
+            my = null;
+        }
+    });
+}
+
+status.deleteContent = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Delete content",
+        module: "content" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.content.delete( check.get(my.module, "id"), function(error, response){
+        my.timeout.end();
+        if(error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.next(my.name);
+            my = null;
+        }
+    });
+}
+
+status.createData = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Create data",
+        module: "data" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.data.create(config.testingTable, { Hello: chance.sentence() }, function(error, response){
+        my.timeout.end();
+        if(error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.set(my.module, response);
+            check.next(my.name);
+            my = null;
+        }
+    });
+}
+
+status.updateData = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Update data",
+        module: "data" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.data.update(config.testingTable, { _id: check.get(my.module, "_id"), Hello: chance.sentence() }, function(error, response){
+        my.timeout.end();
+        if(error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.next(my.name);
+            my = null;
+        }
+    });
+}
+
+status.listData = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "List data" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.data.list(config.testingTable, function(error, response){
+        my.timeout.end();
+        if(error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.next(my.name);
+            my = null;
+        }
+    });
+}
+
+status.deleteData = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Delete data",
+        module: "data" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.data.delete(config.testingTable, check.get(my.module, "_id"), function(error, response){
+        my.timeout.end();
+        if(error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.next(my.name);
+            my = null;
+        }
+    });
+}
+
+status.createPush = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Create push",
+        module: "messages" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.messages.tokens.create({environment: "development", client_identification_sequence: "144", platform: "ios", udid: chance.apple_token() }, function(error, response){
+        my.timeout.end();
+        if (error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.set(my.module, response);
+            check.next(my.name);
+            my = null;
+        }
+    });
+}
+
+status.deletePush = function(check) {
+    var my = {
+        begin: helpers.startTime(),
+        name: "Delete push",
+        module: "messages" };
+
+    my.timeout = new RequestTimeout(my.name, check);
+
+    check.QB.messages.tokens.delete( check.get(my.module, "id"), function(error, response){
+        my.timeout.end();
+        if (error) {
+            check.failed(my.name, error);
+            my = null;
+        } else {
+            check.timeto(my.name, helpers.getLatency(my.begin));
+            check.next(my.name);
+            my = null;
+        }
+    });
+}
+
+status.createDialog = function(check) {
+    var my = {
+        begin: 0,
+        name: "Create dialog",
+        module: "chat" };
+
+    if(check.instance.chat_enabled === false || check.instance.chat_v2 === false) {
+        check.disabled(my.name);
+    } else {
+
+        var users = [check.instance.xmpp.sender.jid.split("-")[0], check.instance.xmpp.recipient.jid.split("-")[0]];
+
+        var options = {
+            url: "https://" + check.instance.endpoint + "/chat/Dialog.json",
+            timeout: config.global_timeout,
+            headers: {
+                "QB-Token": check.get("session", "token")
+            },
+            json: {
+                occupants_ids: users.toString(),
+                name: util.format( "Developer chat (%s) - %d", helpers.time("DD-MM-YY"), helpers.rand([1, 999999]) ),
+                type: 2
+            }
+        };
+
+        my.begin = helpers.startTime();
+
+        request.post(options, function(error, response, body) {
+            if(!error && typeof body.xmpp_room_jid !== "undefined") {
+                check.set(my.module, body);
+                check.timeto(my.name, helpers.getLatency(my.begin));
+                check.next(my.name);
+            } else {
+                if(error === null || typeof error === "undefined" && response.body && response.body.errors) {
+                    error = JSON.stringify(response.body.errors);
+                } else if (typeof body === "string" && body.indexOf("DOCTYPE") !== -1) {
+                    error = "500 'Something went wrong' (HTML response)";
+                } else if (error.code === "ETIMEDOUT") {
+                    error = "Timed out after " + config.global_timeout / 1000 + " seconds.";
+                } else if (error.base) {
+                    error = error.base[0];
                 }
-                
-                QB.data.create(instances[currentLogsInstance].name, log, function(error,response){
-                    if (!error) {
-                    	console.log("Sent logs for " + instances[currentLogsInstance].name);
-                        currentLogsInstance++;
-                        if( currentLogsInstance === numberOfInstances) {
-                            console.log("Sent all logs (x"+currentLogsInstance+")");
-                            callback();
-                            return;
-                        } else {
-							sendLogs();
-							return;
-						}
+                check.set(my.module, -1);
+                check.failed(my.name, error);
+            }
+        });
+    }
+}
+
+status.privateChat = function(check) {
+    var my = {
+        latency: 0,
+        name: "Private chat",
+        module: "chat" },
+
+        current_xmpp = check.instance.xmpp,
+        message_hash = chance.hash(),
+        sender, receiver, listeners, sendMessage, onChat;
+
+    if(check.instance.chat_enabled === false) {
+        check.disabled(my.name);
+    } else {
+
+        var kill = function(reason) {
+            receiver.disconnect();
+            sender.disconnect();
+            receiver = null;
+            sender = null;
+            if(typeof reason !== "undefined") {
+                check.failed(my.name, reason);
+            }
+        };
+
+        my.self_destruct = setTimeout(function() {
+            kill("Timed out after " + config.chat_timeout / 1000 + " seconds.");
+        }, config.chat_timeout);
+
+        onChat = function(from, message) {
+
+            var timeReceived = Date.now(),
+                passed;
+
+            clearTimeout(my.self_destruct);
+
+            if( message.indexOf(":") !== -1 ) {
+                message = message.split(":");
+                my.latency = timeReceived-message[1];
+
+                if(message_hash === message[0]) {
+                    check.timeto(my.name, my.latency);
+                    check.next(my.name);
+                    kill();
+                } else {
+                    kill("Message was received but was inconsistent. (Sent '" + message_hash + "' but received '" + message[0] + "')");
+                }
+
+            } else {
+                kill("Message was completely malformed and could not be read.");
+            }
+        };
+
+        receiver = new ChatUser({
+            credentials: helpers.clone(current_xmpp.recipient),
+            defaults: false,
+            on: { chat: onChat }
+        });
+
+        sender = new ChatUser({
+            credentials: helpers.clone(current_xmpp.sender),
+            defaults: false,
+            on: { online: function() {
+                    setTimeout(function() {
+                        sender.send({
+                            to: current_xmpp.recipient.jid,
+                            message: message_hash + ":" + Date.now()
+                        });
+                    }, 1000);
+                }
+            }
+        });
+    }
+}
+
+status.groupChat = function(check) {
+    var my = {
+        latency: 0,
+        name: "Group chat",
+        module: "chat" },
+
+        current_xmpp = check.instance.xmpp,
+        sender, receiver, listeners, sendMessage, onStanza, senderStanza,
+        message_hash = chance.hash(),
+        presence_count = 0,
+        hasKilled = false;
+
+    if( check.instance.chat_enabled === false || check.instance.chat_v2 === false ) {
+        check.disabled(my.name);
+    }
+    else if ( check.get(my.module) === -1 ) { // this method will return -1 if the previous dialog creation method failed
+        check.failed(my.name, "Could not complete due to dialog creation failure.");
+    }
+    else {
+
+        var room_jid = check.get(my.module, "xmpp_room_jid");
+
+        var kill = function(reason) {
+            receiver.disconnect();
+            sender.disconnect();
+            receiver = null;
+            sender = null;
+            hasKilled = true;
+            if(typeof reason !== "undefined") {
+                check.failed(my.name, reason);
+            }
+            return;
+        };
+
+        my.self_destruct = setTimeout(function() {
+            kill("Timed out after " + config.chat_timeout / 1000 + " seconds.");
+        }, config.chat_timeout);
+
+        senderStanza = function(stanza) {
+            if(stanza.name === "presence") {
+                presence_count++;
+                if(presence_count === 3) {
+                    setTimeout(function() {
+                        if(!hasKilled) {
+                            sender.send({
+                                to: room_jid,
+                                message: message_hash + ":" + Date.now(),
+                                group: true,
+                                history: true
+                            });
+                        }
+                    }, 4000);
+                }
+            }
+        };
+
+        onStanza = function(stanza) {
+            if(stanza.name === "message") {
+                var timeReceived = Date.now(),
+                    passed;
+
+                stanza = stanza.children[0].children[0].toString();
+
+                clearTimeout(my.self_destruct);
+
+                if( stanza.indexOf(":") !== -1 ) {
+                    stanza = stanza.split(":");
+                    my.latency = timeReceived-stanza[1];
+
+                    if(message_hash === stanza[0]) {
+                        kill();
+                        check.timeto(my.name, my.latency);
+                        check.next(my.name);
                     } else {
-	                    setTimeout(function() {
-		                    sendLogs();
-		                    return;
-	                    }, 5000)
+                        kill("Message was received but was inconsistent. (Sent '" + message_hash + "' but received '" + stanza[0] + "')");
                     }
-                });
-                
-	        };
-	        
-	        sendLogs();
 
-	    } else {
-    	    console.log("Could not create new session. Will try again in 10 seconds.");
-    	    setTimeout(function() {submitLogs()}, 10000)    	    
-	    }
-	});
+                } else {
+                    kill("Message was completely malformed and could not be read.");
+                }
+            }
+        };
+
+        receiver = new ChatUser({
+            credentials: helpers.clone(current_xmpp.recipient),
+            defaults: false,
+            on: {online: function(){ receiver.join(room_jid + "/" + current_xmpp.recipient.jid.split("-")[0]); }, stanza: onStanza},
+        });
+
+        sender = new ChatUser({
+            credentials: helpers.clone(current_xmpp.sender),
+            defaults: false,
+            on: { online: function() {sender.join(room_jid + "/" + current_xmpp.sender.jid.split("-")[0]);}, stanza: senderStanza }
+        });
+    }
 }
 
-function thisInstance(item) {
-	if(!testingInstance) return (typeof item !== "undefined" ? instances[current_instance][item] : instances[current_instance]);
-	else return (typeof item !== "undefined" ? testingInstance[item] : instances[current_instance]);
-}
-
-function reset() {
-    latency = {};
-	current_instance = 0;
-	error_log = {};
-	latency.total = {};
-	chatCredentials = {};
-	testingCallback = null;
-	Object.keys(misc).forEach(function(key) {
-		delete misc[key];
-	})
-	misc = {};
-}
-
-function timeTo(stat, time) {
-	
-	var instanceName = thisInstance("name"),
-		time_now = moment().format("DD/MM/YY HH:mm:ss.SSS");
-	
-	if (time > 0) {
-		if(LOG_CHECKS) console.log(time_now.bold.blue + (" [" + instanceName + "] " + stat.toLowerCase() + " ("+ time + "ms)").yellow);
-	} else if (time === -1) {
-		if(LOG_CHECKS) console.log(time_now.bold.blue + (" [" + instanceName + "] " + stat.toLowerCase() + " (disabled)").yellow);
-	} else {
-		if(LOG_CHECKS) console.log(time_now.bold.blue + (" [" + instanceName + "] " + stat.toLowerCase() + " (failed)").yellow);
-	}
-	
-	stat = stat.toLowerCase().replace(/ /g, '_');
-	
-	// If no records of the latency have been made before, create the key in the latency object
-	if(typeof latency[instanceName] === "undefined") latency[instanceName] = {};
-	
-	// Add the time to the latency.instance object
-	latency[instanceName][stat] = time;
-	
-	// If the "total" key hasn't been created, do it. The total is incremented on each timeTo()
-	if(typeof latency.total[instanceName] === "undefined") {
-		latency.total[instanceName] = 0;
-	}
-	
-	// Increment the time
-	latency.total[instanceName] += time;
-}
-
-function newName() {
-    return chance.name().replace(/ /g, '_');
-}
-
-function getTemp(module, field) {
-	if(module && !field && misc[module]) {
-		return misc[module];
-	} else if (module && field && misc[module]) {
-		if(misc[module][field]) {
-			return misc[module][field]
-		} else {
-			return null;
-		}
-	} else {
-		return null;
-	}
-}
-
-function setTemp(module, record) {
-	if(!module || !record) {
-		return misc = {};
-	} else {
-		misc[module] = record;
-	}
-}
-
-function createSession() {
-	var my = {
-		begin: startTime(),
-		name: "Create session" };
-
-	QB.createSession(function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        next(my.name);
-	        my = null;
-	    }
-	});
-}
-
-function createUser() {
-	var my = {
-		begin: startTime(),
-		name: "Create user",
-		module: "user" };
-	
-	QB.users.create({ full_name: chance.name(), login: newName(), password: "password1234" }, function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        setTemp(my.module, response);
-	        next(my.name);
-	        my = null;
-	    }
-	});
-}
-
-function createUserSession() {
-	var my = {
-		begin: startTime(),
-		name: "Create user session",
-		module: "user" };
-	
-	QB.createSession({ login: getTemp(my.module, "login"), password: "password1234" }, function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        next(my.name);
-	        my = null;
-	    }
-	});
-}
-
-function listUsers() {
-	var my = {
-		begin: startTime(),
-		name: "List users" };
-	
-	QB.users.listUsers(function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        next(my.name);
-	        my = null;
-	    }
-	});
-}
-
-function updateUser() {
-	var my = {
-		begin: startTime(),
-		name: "Update user",
-		module: "user" };
-	
-	QB.users.update( getTemp(my.module, "id"), { website: chance.domain() }, function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        next(my.name);
-	        my = null;
-	    }
-	});
-}
-
-function deleteUser() {
-	var my = {
-		begin: startTime(),
-		name: "Delete user",
-		module: "user" };
-	
-	QB.users.delete( getTemp(my.module, "id"), function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        next(my.name);
-	        my = null;
-	    }
-	});
-}
-
-function destroySession() {
+status.retrieveDialogs = function(check) {
     var my = {
-		begin: startTime(),
-		name: "Destroy session" };
-    
-    QB.destroySession(function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        next(my.name);
-	        my = null;
-	    }
-	});
+        begin: 0,
+        name: "Retrieve dialogs",
+        module: "chat" };
+
+    if( check.instance.chat_enabled === false || check.instance.chat_v2 === false ) {
+        check.disabled(my.name);
+    } else {
+
+        var options = {
+            url: "https://" + check.instance.endpoint + "/chat/Dialog.json",
+            timeout: config.global_timeout,
+            headers: {
+                "QB-Token": check.get("session", "token")
+            },
+            json: {
+                limit: 1
+            }
+        };
+
+        my.begin = helpers.startTime();
+
+        request.get(options, function(error, response, body) {
+            if(!error && typeof body.items !== "undefined") {
+                check.timeto(my.name, helpers.getLatency(my.begin));
+                check.next(my.name);
+            } else {
+                if(error === null || typeof error === "undefined" && response.body && response.body.errors) {
+                    error = JSON.stringify(response.body.errors);
+                } else if (typeof body === "string" && body.indexOf("DOCTYPE") !== -1) {
+                    error = "500 'Something went wrong' (HTML response)";
+                } else if (error.code === "ETIMEDOUT") {
+                    error = "Timed out after " + config.global_timeout / 1000 + " seconds.";
+                } else if (error.base) {
+                    error = error.base[0];
+                }
+                check.failed(my.name, error);
+            }
+        });
+    }
 }
 
-function createNewSession() {
+status.removeDialogOccupant = function(check) {
     var my = {
-		begin: startTime(),
-		name: "Create new session" };
+        begin: 0,
+        name: "Remove dialog occupant",
+        module: "chat" };
+
+    if(check.instance.chat_enabled === false || check.instance.chat_v2 === false) {
+        check.disabled(my.name);
+    }
+    else if (check.get(my.module) === -1) { // the dialog() method will return -1 if the previous dialog creation method failed
+        check.failed(my.name, "Could not complete due to dialog creation failure.");
+    }
+    else {
+
+        var endpoint    = check.instance.endpoint,
+            dialog_id   = check.get(my.module, "_id"),
+            user1       = check.get(my.module, "occupants_ids")[0]; // ID of user to remove
+
+        var options = {
+            url: "https://" + endpoint + "/chat/Dialog/" + dialog_id + ".json",
+            timeout: config.global_timeout,
+            headers: {
+                "QB-Token": check.get("session", "token")
+            },
+            json: {
+                pull_all: {
+                    occupants_ids: [user1]
+                }
+            }
+        };
+
+        my.begin = helpers.startTime();
+        request.put(options, function(error, response, body) {
+            if(!error && typeof body.xmpp_room_jid !== "undefined") {
+                check.timeto(my.name, helpers.getLatency(my.begin));
+                check.next(my.name);
+            } else {
+                if(error === null || typeof error === "undefined" && response.body && response.body.errors) {
+                    error = JSON.stringify(response.body.errors);
+                } else if (typeof body === "string" && body.indexOf("DOCTYPE") !== -1) {
+                    error = "500 'Something went wrong' (HTML response)";
+                } else if (error.code === "ETIMEDOUT") {
+                    error = "Timed out after " + config.global_timeout / 1000 + " seconds.";
+                } else if (error.base) {
+                    error = error.base[0];
+                }
+                check.failed(my.name, error);
+            }
+        });
+    }
+}
+
+status.addDialogOccupant = function(check) {
+    var my = {
+        begin: 0,
+        name: "Add dialog occupant",
+        module: "chat" };
+
+    if(check.instance.chat_enabled === false || check.instance.chat_v2 === false) {
+        check.disabled(my.name);
+    }
+    else if (check.get(my.module) === -1) { // the dialog() method will return -1 if the previous dialog creation method failed
+        check.failed(my.name, "Could not complete due to dialog creation failure.");
+    }
+    else {
+
+        var endpoint    = check.instance.endpoint,
+            dialog_id   = check.get(my.module, "_id"),
+            user1       = check.get(my.module, "occupants_ids")[0]; // ID of user to add
+
+        var options = {
+            url: "https://" + endpoint + "/chat/Dialog/" + dialog_id + ".json",
+            timeout: config.global_timeout,
+            headers: {
+                "QB-Token": check.get("session", "token")
+            },
+            json: {
+                push_all: {
+                    occupants_ids: [user1]
+                }
+            }
+        };
+
+        my.begin = helpers.startTime();
+        request.put(options, function(error, response, body) {
+            if(!error && typeof body.xmpp_room_jid !== "undefined") {
+                check.timeto(my.name, helpers.getLatency(my.begin));
+                check.next(my.name);
+            } else {
+                if(error === null || typeof error === "undefined" && response.body && response.body.errors) {
+                    error = JSON.stringify(response.body.errors);
+                } else if (typeof body === "string" && body.indexOf("DOCTYPE") !== -1) {
+                    error = "500 'Something went wrong' (HTML response)";
+                } else if (error.code === "ETIMEDOUT") {
+                    error = "Timed out after " + config.global_timeout / 1000 + " seconds.";
+                } else if (error.base) {
+                    error = error.base[0];
+                }
+                check.set(my.module, -1);
+                check.failed(my.name, error);
+            }
+        });
+    }
+}
+
+if (process.argv[2] === "--go") {
     
-    QB.createSession(config.masterLogin, function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	    	setTemp("session", { token: response.token });
-	        next(my.name);
-	        my = null;
-	    }
-	});
+    var index = -1;
+    
+    var go = function() {
+        new Check(config.instances[++index], {}, function() {
+            if(index !== config.instances.length - 1) go();
+            else console.log("Completed for all instances.");
+        });
+    };
+    
+    go();
+
 }
 
-function createGeodata() {
-	var my = {
-		begin: startTime(),
-		name: "Create geodata",
-		module: "geodata" };
-	
-	QB.location.geodata.create({ latitude: chance.latitude(), longitude: chance.longitude() }, function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        setTemp(my.module, response);
-	        next(my.name);
-	        my = null;
-	    }
-	});
+if (process.argv[2] === "--go-with-test") {
+    instances = config.testInstance;
+    start();
 }
 
-function createPlace() {
-	var my = {
-		begin: startTime(),
-		name: "Create place",
-		module: "place" };
-	
-	QB.location.places.create({ geo_data_id: getTemp("geodata", "id"), title: chance.street(), address: chance.address()}, function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        setTemp(my.module, response.place);
-	        next(my.name);
-	        my = null;
-	    }
-	});
+if (process.argv[2] === "-i" && process.argv[3] !== "") {
+
+    var index = 0, i, len = config.instances.length;
+    for(i = 0; i < len; ++i) {
+        if(config.instances[i].name.toLowerCase() === process.argv[3].toLowerCase()) index = i;
+    }
+
+    var instance = config.instances[index];
+    start(instance, function() {
+        var name = instance.name;
+        console.log("Finished".green);
+        alert(name, { latency: latency[name], errors: error_log[name] || [] }, function(error, response) {
+            if(!error) {
+                console.log("email sent");
+            } else {
+                console.log("email not sent");
+            }
+        });
+    });
 }
 
-function deletePlace() {
-	var my = {
-		begin: startTime(),
-		name: "Delete place",
-		module: "place" };
-	
-	QB.location.places.delete( getTemp(my.module, "id"), function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        next(my.name);
-	        my = null;
-	    }
-	});
-}
-
-function createContent() {
-	var my = {
-		begin: startTime(),
-		name: "Create content",
-		module: "content" };
-	
-	QB.content.create({ name: chance.capitalize(chance.word()), content_type: "image/png", 'public': true }, function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        setTemp(my.module, response);
-	        next(my.name);
-	        my = null;
-	    }
-	});
-}
-
-function listContent() {
-	var my = {
-		begin: startTime(),
-		name: "List content",
-		module: "content" };
-	
-	QB.content.list(function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        next(my.name);
-	        my = null;
-	    }
-	});
-}
-
-function deleteContent() {
-	var my = {
-		begin: startTime(),
-		name: "Delete content",
-		module: "content" };
-	
-	QB.content.delete( getTemp(my.module, "id"), function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        next(my.name);
-	        my = null;
-	    }
-	});
-}
-
-function createData() {
-	var my = {
-		begin: startTime(),
-		name: "Create data",
-		module: "data" };
-	
-	QB.data.create(config.testingTable, { Hello: chance.sentence() }, function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        setTemp(my.module, response);
-	        next(my.name);
-	        my = null;
-	    }
-	});
-}
-
-function updateData() {
-	var my = {
-		begin: startTime(),
-		name: "Update data",
-		module: "data" };
-		
-	QB.data.update(config.testingTable, { _id: getTemp(my.module, "_id"), Hello: chance.sentence() }, function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        next(my.name);
-	        my = null;
-	    }
-	});
-}
-
-function listData() {
-	var my = {
-		begin: startTime(),
-		name: "List data" };
-	
-	QB.data.list(config.testingTable, function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        next(my.name);
-	        my = null;
-	    }
-	});
-}
-
-function deleteData() {
-	var my = {
-		begin: startTime(),
-		name: "Delete data",
-		module: "data" };
-	
-	QB.data.delete(config.testingTable, getTemp(my.module, "_id"), function(error, response){
-	    if(error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-	        timeTo(my.name, getLatency(my.begin));
-	        next(my.name);
-	        my = null;
-	    }
-	});
-}
-
-function createPush() {
-	var my = {
-		begin: startTime(),
-		name: "Create push",
-		module: "messages" };
-		
-	QB.messages.tokens.create({environment: "development", client_identification_sequence: "144", platform: "ios", udid: chance.apple_token() }, function(error, response){
-	    if (error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-            timeTo(my.name, getLatency(my.begin));
-            setTemp(my.module, response);
-	        next(my.name);
-	        my = null;
-	    }
-	});
-}
-
-function deletePush() {
-	var my = {
-		begin: startTime(),
-		name: "Delete push",
-		module: "messages" };
-		
-	QB.messages.tokens.delete( getTemp(my.module, "id"), function(error, response){
-	    if (error) {
-	        failed(my.name, error);
-	        my = null;
-	    } else {
-            timeTo(my.name, getLatency(my.begin));
-	        next(my.name);
-	        my = null;
-	    }
-	});
-}
-
-function createDialog() {
-	var my = {
-		begin: 0,
-		name: "Create dialog",
-		module: "chat" };
-	
-	if(thisInstance("chat_enabled") === false || thisInstance("chat_v2") === false) {
-		moduleDisabled(my.name);
-	} else {
-		
-		var chat_users = config.xmpp[thisInstance("name")],
-			endpoint = thisInstance("endpoint");
-		
-		var options = {
-			url: "https://" + endpoint + "/chat/Dialog.json",
-			headers: {
-				"QB-Token": getTemp("session", "token")
-			},
-			json: {
-				occupants_ids: [chat_users.sender.jid.split("-")[0], chat_users.recipient.jid.split("-")[0]].toString(),
-				name: "Developer Chat (" + moment().format("DD-MM-YY") + ") - " + chance.natural({min: 1, max: 999999}),
-				type: 2
-			}
-		};
-		
-		console.log("setting headers on request to " + options.url); // Just for logs to fit in with the other modules :(
-		my.begin = startTime();
-		
-		request.post(options, function(error, response, body) {
-			if(!error && typeof body.xmpp_room_jid !== "undefined") {
-				setTemp(my.module, body);
-				timeTo(my.name, getLatency(my.begin));
-				next(my.name);
-			} else {
-				if(error === null || typeof error === "undefined" && response.body && response.body.errors) { error=JSON.stringify(response.body.errors); };
-				setTemp(my.module, -1);
-				failed(my.name, error.toString());
-			}
-		});
-	}
-}
-
-function privateChat() {
-	var my = {
-		latency: 0,
-		name: "Private chat",
-		module: "chat" },
-
-		current_xmpp = config.xmpp[thisInstance("name")],
-		message_hash = chance.hash(),
-		sender, receiver, listeners, sendMessage, onChat;
-	
-	var isbb = (thisInstance("chat_enabled") === "BabyBundle");
-	
-	if(thisInstance("chat_enabled") === false) {
-		moduleDisabled(my.name);
-	} else {
-			
-		var kill = function(reason) {
-			receiver.disconnect();
-			sender.disconnect();
-			receiver = null;
-			sender = null;
-			if(typeof reason !== "undefined") {
-				failed(my.name, reason);
-			}
-		};
-		
-		// Timeout the whole function after 10 seconds
-		my.self_destruct = setTimeout(function() {
-	    	kill("Time to connect and send the message exceeded " + (config.chat_timeout / 1000) + " seconds.");
-		}, config.chat_timeout);
-		
-		onChat = function(from, message) {
-		
-			var timeReceived = Date.now(),
-				passed;
-			
-			clearTimeout(my.self_destruct);
-			
-			kill();
-			
-			if( message.indexOf(":") !== -1 ) {
-				message = message.split(":");
-				my.latency = timeReceived-message[1];
-				
-				if(message_hash === message[0]) {
-					timeTo(my.name, my.latency);
-					next(my.name);
-				} else {
-					kill("Message was received but was inconsistent. (Sent '" + message_hash + "' but received '" + stanza[0] + "')");
-				}
-				
-			} else {
-				kill("Message was completely malformed and could not be read.");
-			}
-		};
-		
-		receiver = new ChatUser({
-			credentials: config.clone(current_xmpp.recipient),
-			defaults: false,
-			on: {chat: onChat}
-		});
-		
-		sender = new ChatUser({
-			credentials: config.clone(current_xmpp.sender),
-			defaults: false,
-			on: { online: function() {
-					setTimeout(function() {
-						sender.send({
-							to: current_xmpp.recipient.jid,
-							message: message_hash + ":" + Date.now()
-						});
-					}, 1000);
-				} 
-			}
-		});
-	}
-}
-
-function groupChat() {
-	var my = {
-		latency: 0,
-		name: "Group chat",
-		module: "chat" },
-
-		current_xmpp = config.xmpp[thisInstance("name")],
-		sender, receiver, listeners, sendMessage, onStanza, senderStanza,
-		message_hash = chance.hash(),
-		presence_count = 0;
-	
-	if( thisInstance("chat_enabled") === false || thisInstance("chat_v2") === false ) {
-		moduleDisabled(my.name);
-	}
-	else if ( getTemp(my.module) === -1 ) { // the dialog() method will return -1 if the previous dialog creation method failed
-		failed(my.name, "Could not test group chat due to dialog creation failure.");
-	}
-	else {
-		
-		var room_jid = getTemp(my.module, "xmpp_room_jid");
-		
-		var kill = function(reason) {
-			receiver.disconnect();
-			sender.disconnect();
-			receiver = null;
-			sender = null;
-			if(typeof reason !== "undefined") {
-				failed(my.name, reason);
-			}
-			return;
-		};
-		
-		// Timeout the whole function after 10 seconds (well, the 10 seconds is defined in the config file)
-		my.self_destruct = setTimeout(function() {
-			kill("Time to connect and send the message exceeded " + (config.chat_timeout/1000) + " seconds.");
-		}, config.chat_timeout);
-		
-		senderStanza = function(stanza) {
-			if(stanza.name === "presence") {
-				presence_count++;
-										
-				// Will receive 3 presences before it's ok to send a message otherwise it will hang until the end of time
-				if(presence_count === 3) {
-					sender.send({
-						to: room_jid,
-						message: message_hash + ":" + Date.now(),
-						group: true,
-						history: true
-					});
-				}
-			}
-		};
-		
-		onStanza = function(stanza) {
-			if(stanza.name === "message") {
-				var timeReceived = Date.now(),
-					passed;
-				
-				stanza = stanza.children[0].children[0].toString();
-				
-				clearTimeout(my.self_destruct);
-				
-				if( stanza.indexOf(":") !== -1 ) {
-					stanza = stanza.split(":");
-					my.latency = timeReceived-stanza[1];
-					
-					if(message_hash === stanza[0]) {
-						kill();
-						timeTo(my.name, my.latency);
-						next(my.name);
-					} else {
-						kill("Message was received but was inconsistent. (Sent '" + message_hash + "' but received '" + stanza[0] + "')");
-					}
-					
-				} else {
-					kill("Message was completely malformed and could not be read.");
-				}
-			}
-		};
-		
-		receiver = new ChatUser({
-			credentials: config.clone(current_xmpp.recipient),
-			defaults: false,
-			on: {online: function(){ receiver.join(room_jid + "/" + current_xmpp.recipient.jid.split("-")[0]); }, stanza: onStanza},
-		});
-		
-		sender = new ChatUser({
-			credentials: config.clone(current_xmpp.sender),
-			defaults: false,
-			on: { online: function() {sender.join(room_jid + "/" + current_xmpp.sender.jid.split("-")[0]);}, stanza: senderStanza }
-		});
-	}
-}
-
-function retrieveDialogs() {
-	var my = {
-		begin: 0,
-		name: "Retrieve dialogs",
-		module: "chat" };	
-	
-	if( thisInstance("chat_enabled") === false || thisInstance("chat_v2") === false ) {
-		moduleDisabled(my.name);
-	}
-	else {
-		
-		var endpoint = thisInstance("endpoint");
-		
-		console.log("setting headers on request to https://" + endpoint + "/chat/Dialog.json");
-	
-		var options = {
-			url: "https://" + endpoint + "/chat/Dialog.json",
-			headers: {
-				"QB-Token": getTemp("session", "token")
-			},
-			json: {
-				limit: 1
-			}
-		};
-		
-		my.begin = startTime();
-		request.get(options, function(error, response, body) {
-			if(!error && typeof body.items !== "undefined") {
-				timeTo(my.name, getLatency(my.begin));
-				next(my.name);
-			} else {
-				if(error === null || typeof error === "undefined" && response.body && response.body.errors) { error=JSON.stringify(response.body.errors); };
-				failed(my.name, error.toString());
-			}
-		});
-	}
-}
-
-function removeDialogOccupant() {
-	var my = {
-		begin: 0,
-		name: "Remove dialog occupant",
-		module: "chat" };
-	
-	if(thisInstance("chat_enabled") === false || thisInstance("chat_v2") === false) {
-		moduleDisabled(my.name);
-	}
-	else if (getTemp(my.module) === -1) { // the dialog() method will return -1 if the previous dialog creation method failed
-		failed(my.name, "Could not '" + my.name + "' due to dialog creation failure.");
-	}
-	else {
-		
-		var	endpoint 	= thisInstance("endpoint"),
-			dialog_id 	= getTemp(my.module, "_id"),
-			user1		= getTemp(my.module, "occupants_ids")[0]; // ID of user to remove
-				
-		console.log("setting headers on request to https://" + endpoint + "/chat/Dialog.json");
-	
-		var options = {
-			url: "https://" + endpoint + "/chat/Dialog/" + dialog_id + ".json",
-			headers: {
-				"QB-Token": getTemp("session", "token")
-			},
-			json: {
-				pull_all: {
-					occupants_ids: [user1]
-				}
-			}
-		};
-		
-		my.begin = startTime();
-		request.put(options, function(error, response, body) {
-			if(!error && typeof body.xmpp_room_jid !== "undefined") {
-				timeTo(my.name, getLatency(my.begin));
-				next(my.name);
-			} else {
-				if(error === null || typeof error === "undefined" && response.body && response.body.errors) { error=JSON.stringify(response.body.errors); };
-				failed(my.name, error.toString());
-			}
-		});
-	}
-}
-
-function addDialogOccupant() {
-	var my = {
-		begin: 0,
-		name: "Add dialog occupant",
-		module: "chat" };
-	
-	if(thisInstance("chat_enabled") === false || thisInstance("chat_v2") === false) {
-		moduleDisabled(my.name);
-	}
-	else if (getTemp(my.module) === -1) { // the dialog() method will return -1 if the previous dialog creation method failed
-		failed(my.name, "Could not '" + my.name + "' due to dialog creation failure.");
-	}
-	else {
-	
-		var	endpoint 	= thisInstance("endpoint"),
-			dialog_id 	= getTemp(my.module, "_id"),
-			user1		= getTemp(my.module, "occupants_ids")[0]; // ID of user to add
-				
-		console.log("setting headers on request to https://" + endpoint + "/chat/Dialog.json");
-	
-		var options = {
-			url: "https://" + endpoint + "/chat/Dialog/" + dialog_id + ".json",
-			headers: {
-				"QB-Token": getTemp("session", "token")
-			},
-			json: {
-				push_all: {
-					occupants_ids: [user1]
-				}
-			}
-		};
-		
-		my.begin = startTime();
-		request.put(options, function(error, response, body) {
-			if(!error && typeof body.xmpp_room_jid !== "undefined") {
-				timeTo(my.name, getLatency(my.begin));
-				next(my.name);
-			} else {
-				if(error === null || typeof error === "undefined" && response.body && response.body.errors) { error=JSON.stringify(response.body.errors); };
-				failed(my.name, error.toString());
-			}
-		});
-	}
-}
-
-module.exports = start;
+module.exports = Check;

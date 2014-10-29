@@ -2,10 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Status</title>
     <link href="/files/bootstrap-grid.min.css" rel="stylesheet" />
     <link href="/files/pikaday.css" rel="stylesheet">
     <link href="/files/style.css" rel="stylesheet"/>
+	<script type="text/javascript" src="//use.typekit.net/jhi8djg.js"></script>
+	<script type="text/javascript">try{Typekit.load();}catch(e){}</script>
 </head>
 <body>
 
@@ -17,9 +20,13 @@
     <div class="instance_header row">
     	<div class="col-xs-6">
 			<h5 class="instance_name">...</h5>
+			<button id="refresh"><svg width="10" height="10.5" viewBox="0 0 20 21" xmlns="http://www.w3.org/2000/svg"><title>refresh</title><desc></desc><path d="M19.674 12.798c0-.221-.182-.417-.417-.417h-2.5c-.195 0-.326.117-.391.299-.221.521-.378 1.016-.69 1.523-1.211 1.979-3.359 3.177-5.677 3.177-1.68 0-3.307-.651-4.531-1.797l1.784-1.784c.156-.156.247-.365.247-.586 0-.456-.378-.833-.833-.833h-5.833c-.456 0-.833.378-.833.833v5.833c0 .456.378.833.833.833.221 0 .43-.091.586-.247l1.68-1.68c1.849 1.758 4.31 2.76 6.849 2.76 4.805 0 8.607-3.216 9.714-7.826l.013-.091zm.326-10.417c0-.456-.378-.833-.833-.833-.221 0-.43.091-.586.247l-1.693 1.68c-1.849-1.745-4.336-2.76-6.888-2.76-4.805 0-8.646 3.203-9.766 7.826v.091c0 .221.182.417.417.417h2.591c.195 0 .326-.117.391-.299.221-.521.378-1.016.69-1.523 1.211-1.979 3.359-3.177 5.677-3.177 1.68 0 3.307.638 4.544 1.784l-1.797 1.797c-.156.156-.247.365-.247.586 0 .456.378.833.833.833h5.833c.456 0 .833-.378.833-.833v-5.833z" fill="#dddddd"/></svg></button>
 		</div>
 		<div class="col-xs-6">
-			<a id="lastchecked">Retrieving status...</a>
+			<a id="lastchecked">
+				<svg width="11" height="13" viewBox="0 0 11 13" xmlns="http://www.w3.org/2000/svg"><title>calendar</title><desc></desc><path d="M.769 10.214v-1.768h1.731v1.768h-1.731zm2.115 0v-1.768h1.923v1.768h-1.923zm-2.115-2.161v-1.964h1.731v1.964h-1.731zm2.115 0v-1.964h1.923v1.964h-1.923zm-2.115-2.357v-1.768h1.731v1.768h-1.731zm4.423 4.518v-1.768h1.923v1.768h-1.923zm-2.308-4.518v-1.768h1.923v1.768h-1.923zm4.615 4.518v-1.768h1.731v1.768h-1.731zm-2.308-2.161v-1.964h1.923v1.964h-1.923zm-2.115-5.304c0 .104-.09.196-.192.196h-.385c-.102 0-.192-.092-.192-.196v-1.768c0-.104.09-.196.192-.196h.385c.102 0 .192.092.192.196v1.768zm4.423 5.304v-1.964h1.731v1.964h-1.731zm-2.308-2.357v-1.768h1.923v1.768h-1.923zm2.308 0v-1.768h1.731v1.768h-1.731zm.192-2.946c0 .104-.09.196-.192.196h-.385c-.102 0-.192-.092-.192-.196v-1.768c0-.104.09-.196.192-.196h.385c.102 0 .192.092.192.196v1.768zm2.308-.393c0-.43-.349-.786-.769-.786h-.769v-.589c0-.54-.433-.982-.962-.982h-.385c-.529 0-.962.442-.962.982v.589h-2.308v-.589c0-.54-.433-.982-.962-.982h-.385c-.529 0-.962.442-.962.982v.589h-.769c-.421 0-.769.356-.769.786v7.857c0 .43.349.786.769.786h8.462c.421 0 .769-.356.769-.786v-7.857z" fill="#CCC"/></svg>
+				<span>Retrieving status...</span>
+			</a>
 			<input type="hidden" id="pikaday"/>
 			<div id="timemachine">
 				<div id="datepicker"></div>
@@ -35,35 +42,35 @@
     <div class="row" id="users-head">
         <div class="col-xs-12"><h4>Users</h4></div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="create_user_session">Authenticate user</span></div>
         <div class="col-xs-3 lights" id="create_user_session"><span class="time"></span></div>
         <div class="graph-wrap" data-module="create_user_session">
 			<div class="graph"></div>
         </div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="create_user">Create user</span></div>
         <div class="col-xs-3 lights" id="create_user"><span class="time"></span></div>
         <div class="graph-wrap" data-module="create_user">
 			<div class="graph"></div>
         </div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="list_users">List users</span></div>
         <div class="col-xs-3 lights" id="list_users"><span class="time"></span></div>
         <div class="graph-wrap" data-module="list_users">
 			<div class="graph"></div>
         </div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="update_user">Update user</span></div>
         <div class="col-xs-3 lights" id="update_user"><span class="time"></span></div>
         <div class="graph-wrap" data-module="update_user">
 			<div class="graph"></div>
         </div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="delete_user">Delete user</span></div>
         <div class="col-xs-3 lights" id="delete_user"><span class="time"></span></div>
         <div class="graph-wrap" data-module="delete_user">
@@ -78,42 +85,42 @@
     <div class="row" id="chat-head">
         <div class="col-xs-12"><h4>Chat</h4></div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="create_dialog">Create dialog</span></div>
         <div class="col-xs-3 lights" id="create_dialog"><span class="time"></span></div>
         <div class="graph-wrap" data-module="create_dialog">
 			<div class="graph"></div>
         </div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="private_chat">Private chat</span></div>
         <div class="col-xs-3 lights" id="private_chat"><span class="time"></span></div>
         <div class="graph-wrap" data-module="private_chat">
 			<div class="graph"></div>
         </div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="group_chat">Group chat</span></div>
         <div class="col-xs-3 lights" id="group_chat"><span class="time"></span></div>
         <div class="graph-wrap" data-module="group_chat">
 			<div class="graph"></div>
         </div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="retrieve_dialogs">Retrieve dialogs</span></div>
         <div class="col-xs-3 lights" id="retrieve_dialogs"><span class="time"></span></div>
         <div class="graph-wrap" data-module="retrieve_dialogs">
 			<div class="graph"></div>
         </div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="remove_dialog_occupant">Update dialog <code class="light">(pull)</code></span></div>
         <div class="col-xs-3 lights" id="remove_dialog_occupant"><span class="time"></span></div>
         <div class="graph-wrap" data-module="remove_dialog_occupant">
 			<div class="graph"></div>
         </div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="add_dialog_occupant">Update dialog <code class="light">(push)</code></span></div>
         <div class="col-xs-3 lights" id="add_dialog_occupant"><span class="time"></span></div>
         <div class="graph-wrap" data-module="add_dialog_occupant">
@@ -128,14 +135,14 @@
     <div class="row" id="location-head">
         <div class="col-xs-12"><h4>Location</h4></div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="create_geodata">Create geodata</span></div>
         <div class="col-xs-3 lights" id="create_geodata"><span class="time"></span></div>
         <div class="graph-wrap" data-module="create_geodata">
 			<div class="graph"></div>
         </div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="create_place">Create place</span></div>
         <div class="col-xs-3 lights" id="create_place"><span class="time"></span></div>
         <div class="graph-wrap" data-module="create_place">
@@ -150,14 +157,14 @@
     <div class="row" id="content-head">
         <div class="col-xs-12"><h4>Content</h4></div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="create_content">Create content</span></div>
         <div class="col-xs-3 lights" id="create_content"><span class="time"></span></div>
         <div class="graph-wrap" data-module="create_content">
 			<div class="graph"></div>
         </div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="list_content">List content</span></div>
         <div class="col-xs-3 lights" id="list_content"><span class="time"></span></div>
         <div class="graph-wrap" data-module="list_content">
@@ -172,28 +179,28 @@
     <div class="row" id="objects-head">
         <div class="col-xs-12"><h4>Custom Objects</h4></div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="create_data">Create data</span></div>
         <div class="col-xs-3 lights" id="create_data"><span class="time"></span></div>
         <div class="graph-wrap" data-module="create_data">
 			<div class="graph"></div>
         </div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="update_data">Update data</span></div>
         <div class="col-xs-3 lights" id="update_data"><span class="time"></span></div>
         <div class="graph-wrap" data-module="update_data">
 			<div class="graph"></div>
         </div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="list_data">List data</span></div>
         <div class="col-xs-3 lights" id="list_data"><span class="time"></span></div>
         <div class="graph-wrap" data-module="list_data">
 			<div class="graph"></div>
         </div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="delete_data">Delete data</span></div>
         <div class="col-xs-3 lights" id="delete_data"><span class="time"></span></div>
         <div class="graph-wrap" data-module="delete_data">
@@ -208,21 +215,21 @@
 	<div class="row" id="messages-head">
         <div class="col-xs-12"><h4>Messages</h4></div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="create_push">Create subscription</span></div>
         <div class="col-xs-3 lights" id="create_push"><span class="time"></span></div>
         <div class="graph-wrap" data-module="create_push">
 			<div class="graph"></div>
         </div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="delete_push">Delete subscription</span></div>
         <div class="col-xs-3 lights" id="delete_push"><span class="time"></span></div>
         <div class="graph-wrap" data-module="delete_push">
 			<div class="graph"></div>
         </div>
     </div>
-    <div class="row">
+    <div class="row stat">
         <div class="col-xs-9 api-subtitle"><span data-open-graph="receive_push">Receive push notification</span></div>
         <div class="col-xs-3 lights" id="receive_push"><span class="time"></span></div>
         <div class="graph-wrap" data-module="receive_push">
@@ -234,7 +241,7 @@
     </div>
     
     <footer>
-	    <span>This data is automatically generated every 10 minutes by uploading data to the Quickblox API and measuring both the latency and whether the request was fulfilled as expected. The full source code is available here.</a>
+    	This data is automatically generated every 10 minutes by uploading data to the Quickblox API and measuring both the latency and whether the request was fulfilled as expected.<br><a href="https://github.com/QuickBlox/quickblox-status-checker-2.0">The full source code is available here.</a>
 	</footer>
 </div>
 </div>
@@ -245,16 +252,14 @@
 <script src="/files/pikaday.min.js"></script>
 <script src="/files/pull.js"></script>
 
-<script type="text/javascript">
-    var _gaq = _gaq || [];
-    _gaq.push(['_setAccount', 'UA-26728270-1']);
-    _gaq.push(['_trackPageview']);
-    
-    (function() {
-        var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
-        ga.src = ('https:' == document.location.protocol ? 'https://' : 'http://') + 'stats.g.doubleclick.net/dc.js';
-        var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
-    })();
+<script>
+	(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+	(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+	m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+	})(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+	
+	ga('create', 'UA-26728270-7', 'auto');
+	ga('send', 'pageview');
 </script>
 
 </body>

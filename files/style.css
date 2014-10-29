@@ -83,30 +83,81 @@ footer {
     margin: 0;
     text-transform: uppercase;
 }
+.instance_name,
+#refresh {
+    float: left;
+}
+#refresh {
+	opacity: 0;
+	-webkit-transform: rotate(-90deg);
+    -webkit-appearance: none;
+    background: none;
+    border: none;
+    padding: 0;
+    margin-left: 5px;
+    margin-top: -1px;
+}
+#refresh,
+#refresh:focus,
+#refresh:active {
+	outline: none
+}
+#refresh, #refresh path {
+    -webkit-transition: all 1s ease;
+    -moz-transition: all 1s ease;
+    transition: all 1s ease;
+}
+#refresh.show {
+	opacity: 1;
+	-webkit-transform: rotate(0deg);
+}
+#refresh.refreshing {
+	-webkit-animation: loading 2s linear infinite;
+}
+#refresh.refreshing path {
+	fill: #0993FF;
+}
+@-webkit-keyframes loading {
+	0% { -webkit-transform: rotate(0deg) }
+	100% { -webkit-transform: rotate(360deg) }
+}
 #lastchecked {
     float: right;
     font-size: 12px;
     font-weight: 300;
     color: #ccc;
+    margin-top:2px;
     line-height: 1;
     -webkit-user-select: none;
     -moz-user-select: none;
     user-select: none;
     padding: 1px 0 0;
     border-bottom: 1px solid #FFF;
+}
+#lastchecked, #lastchecked path {
     -webkit-transition: all .2s ease;
     -moz-transition: all .2s ease;
     transition: all .2s ease;
 }
 #lastchecked:hover {
     text-decoration: none;
-    border-bottom: 1px solid #EBEBEB;
-    padding: 1px 0 2px;
+    color: #666;
     cursor: pointer;
+}
+#lastchecked:hover path {
+	fill: #666;
+}
+#lastchecked svg {
+	vertical-align: sub;
 }
 .api-subtitle {
     color: #a0a0a0;
     margin-bottom: 5px;
+}
+.api-subtitle, .lights {
+	-webkit-transition: all .5s ease;
+	-moz-transition: all .5s ease;
+	transition: all .5s ease;
 }
 .time {
     font-size: 10px;
@@ -135,6 +186,83 @@ footer {
 	font-size: 9px;
 	padding-top: 0.6em;
 }
+.time.waiting {
+    background: #E8E8E8;
+    -webkit-animation: bounce_entry .3s ease, waiting_pulse 1s ease infinite;
+    -moz-animation: bounce_entry .3s ease, waiting_pulse 1s ease infinite;
+    animation: bounce_entry .3s ease, waiting_pulse 1s ease infinite;
+    font-size:20px;
+    line-height: 0;
+}
+
+@-webkit-keyframes waiting_pulse {
+    0% { background: #E8E8E8; }
+    50% { background: #DDDDDD; }
+    100% { background: #E8E8E8; }
+}
+
+@-webkit-keyframes bounce_entry {
+	0% { -webkit-transform: scale(.5); opacity:.5; }
+	100% { -webkit-transform: scale(1); opacity:1; }
+}
+
+@-webkit-keyframes scale_in {
+	0% { -webkit-transform: scale(2); opacity:.5; }
+	100% { -webkit-transform: scale(1); opacity:1; }
+}
+
+@-moz-keyframes waiting_pulse {
+    0% { background: #E8E8E8; }
+    50% { background: #DDDDDD; }
+    100% { background: #E8E8E8; }
+}
+
+@-moz-keyframes bounce_entry {
+	0% { -moz-transform: scale(.5); opacity:.5; }
+	100% { -moz-transform: scale(1); opacity:1; }
+}
+
+@-moz-keyframes scale_in {
+	0% { -moz-transform: scale(2); opacity:.5; }
+	100% { -moz-transform: scale(1); opacity:1; }
+}
+
+@keyframes waiting_pulse {
+    0% { background: #E8E8E8; }
+    50% { background: #DDDDDD; }
+    100% { background: #E8E8E8; }
+}
+
+@keyframes bounce_entry {
+	0% { transform: scale(.5); opacity:.5; }
+	100% { transform: scale(1); opacity:1; }
+}
+
+@keyframes scale_in {
+	0% { transform: scale(2); opacity:.5; }
+	100% { transform: scale(1); opacity:1; }
+}
+
+.time-title {
+    text-align: center;
+    font-size: 10px;
+    font-weight: bold;
+    margin-top: 10px;
+    color: #A0A0A0;
+    -webkit-animation: scale_in .5s ease;
+    -moz-animation: scale_in .5s ease;
+    animation: scale_in .5s ease;
+}
+
+.time-title:last-child {
+    color: #4298E0;
+}
+
+span.unit {
+	text-transform: uppercase;
+	font-weight: 100;
+	font-size: 0.7em;
+}
 .time span.time-loading {
 	color: #CCC;
 	font-size: 14px;
@@ -151,6 +279,8 @@ footer {
     background: white;
     border-radius: 50px;
     padding: 55px 40px 40px;
+    -webkit-box-shadow: 0 0 50px rgba(0,0,0,0.2);
+    -moz-box-shadow: 0 0 50px rgba(0,0,0,0.2);
     box-shadow: 0 0 50px rgba(0,0,0,0.2);
     margin: 0 auto;
     -webkit-font-smoothing: antialiased;
@@ -208,7 +338,7 @@ footer {
 .graph-wrap.open .graph:before {
     content: "";
     position: absolute;
-    right: 45px;
+    right: 8.5%;
     top: -8px;
     width: 0;
     height: 0;
@@ -320,4 +450,26 @@ span[data-open-graph]:hover {
 	font-size: 1.8em;
 	padding-top: 15%;
 	padding: 15% 10% 0;
+}
+.downtime {
+	background: #FFECEC;
+	color: #F30;
+	text-shadow: none;
+	margin: -10px 0 15px;
+	padding: 10px;
+	border-radius: 5px;
+	border: 1px solid #FFD9D9;
+}
+
+@media screen and (max-width: 560px) {
+	body > .container {
+		padding: 0;
+	}
+	#lastchecked {
+		text-align: right;
+		line-height: 16px;
+	}
+	.graph-wrap.open .graph:before {
+		right: 50px;
+	}
 }

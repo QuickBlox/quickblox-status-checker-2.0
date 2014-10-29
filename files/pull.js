@@ -2,7 +2,9 @@ var raw_data,
 	errors,
 	records,
 	push_notifications,
+	time_of_latest_check,
 	charts = {},
+	room_has_been_made = false,
 	picker = new Pikaday({
 		field: document.getElementById("datepicker"),
 		container: document.getElementById("datepicker"),
@@ -46,7 +48,7 @@ $(document).ready(function(){
 
 	if(location.pathname !== "/" && location.pathname !== "") {
 		var path = location.pathname.split("/");
-		$(".instance_name").text(path[path.length-1] + " report");
+		$(".instance_name").text(path[2] + " report");
 	} else {
 		$(".instance_name").text("Free tier report");
 	}
@@ -59,6 +61,35 @@ $(document).ready(function(){
 			location.hash = "";
 		}
 		$("#timemachine, body").removeClass("datepicker-open");
+	});
+	
+	setTimeout(function() {
+		$("#refresh").addClass("show");
+	}, 2000)
+	
+	$("#refresh").click(function() {
+		$(this).addClass("refreshing");
+		$(this).prop("disabled", true)
+		makeRoomForMe();
+		var instanceName,
+			pathname = location.pathname;
+		if(pathname.length < 3) {
+			instanceName = "quickbloxstarter";
+		} else {
+			instanceName = pathname.split("/")[2];
+		}
+		
+		getStatsNow(instanceName, function(error, latency, errors) {
+			if(!error) {
+				console.log("Got status");
+				console.log({latency: latency, errors: errors});
+				$("#refresh").removeClass("show refreshing");
+				setTimeout(function() {$("#refresh").css("display", "none")}, 500)
+				showStatus(latency, false, "now_");
+			} else {
+				console.log(error);
+			}
+		});
 	});
 
 	$("#load_latest").click(function() {
@@ -95,6 +126,7 @@ $(document).ready(function(){
 function init() {
 	var recordsToGet = whatsTheTime();
 	switchOffTheLights();
+	makeRoomForMe(true);
 	getStatus(recordsToGet, function(data){
 		records = parseLogs(data);
 		if(recordsToGet === "latest") {
@@ -121,7 +153,7 @@ function getStatus(date, callback) {
 	};
 
 	var error = function(error){
-		showMessage("Stats could not be retrieved for this date. Resorting to latest...")
+		showMessage("Stats could not be retrieved for this date. Resorting to latest...");
 	};
 
 	$.ajax({ url: "http://status.quickblox.com" + instance + date + ".json", method: "GET", dataType: "json", success: success, error: error });
@@ -146,35 +178,97 @@ function switchOffTheLights() {
 	});
 }
 
-function showStatus(logs, isLatest) {
-	logs = JSON.parse(JSON.stringify(logs)); // LOGS IS CONNECTED TO THE GLOBAL FUCKING RECORDS OBJECT WTF WHY
-	if(push_notifications[0] && push_notifications[0].delivery) logs["receive_push"] = push_notifications[0].delivery;
+function makeRoomForMe(reverse, callback) {
+	
+	if(!reverse) {
+		var delay = 0;
+		
+		room_has_been_made = true;
+	
+		$(".api-subtitle").each(function() {
+		    delay += 50;
+		    var $this = $(this);
+		    setTimeout(function() {
+		        $this.removeClass("col-xs-9").addClass("col-xs-8");
+		        $this.next().removeClass("col-xs-3").addClass("col-xs-2");
+		    }, delay);
+		});
+		
+		delay = 1000;
+		
+		$(".lights").each(function(index) {
+		    var $this = $(this);
+		    delay += 80;
+		    setTimeout(function() {
+		        $this.after('<div class="lights col-xs-2 for_now" id="now_' + $this.attr("id") + '"><span class="time waiting">...</span></div>');
+		    }, delay);
+		});
+		
+		setTimeout(function() {
+			$("#users-head .col-xs-12").removeClass("col-xs-12").addClass("col-xs-8")
+									   .after('<div class="col-xs-2 time-title">' + time_of_latest_check + '</div><div class="col-xs-2 time-title">Now</div></div>');
+		}, 1000);
+	} else {
+		room_has_been_made = false;
+		$(".lights.for_now").remove();
+		$(".api-subtitle").removeClass("col-xs-8").addClass("col-xs-9");
+		$(".lights").removeClass("col-xs-2").addClass("col-xs-3");
+		$(".time-title").remove();
+		$("#users-head .col-xs-8").removeClass(".col-xs-8").addClass("col-xs-12")
+	}
+}
+
+function getStatsNow(instance, callback) {
+	
+	var success = function(data) {
+		callback(null, data.latency, data.error_log);
+	};
+
+	var error = function(error){
+		showMessage("Could not run now. This is a client side error, unrelated to the status of the API.");
+		/* location.reload(); */
+		callback(error)
+	};
+	
+	console.log("Making request");
+	$.ajax({ url: "http://status.quickblox.com/now/" + instance + ".json", method: "GET", dataType: "json", success: success, error: error });
+
+}
+
+function showStatus(logs, isLatest, idPrefix) {
+	idPrefix = typeof idPrefix === "undefined" ? "" : idPrefix;
+	logs = JSON.parse(JSON.stringify(logs));
+	if(push_notifications[0] && push_notifications[0].delivery && !idPrefix) logs["receive_push"] = push_notifications[0].delivery;
 	Object.keys(logs).forEach(function(module) {
 		if(logs.hasOwnProperty(module)) {
-			var element = "#" + module + " .time",
+			var element = "#" + idPrefix + module + " .time",
 				time = logs[module];
 	
 			var result = "pass";
 			if(time === 0) result = "failed";
-			else if (time > 2500) result = "slow";
+			else if (time > 6000) result = "slow";
 			else if(time === -1) result = "disabled";
-	
+						
+			if(idPrefix) $(".lights .time").removeClass("waiting");
 			$(element).addClass(result);
-			$(element).html((time !== -1 && time !== 0 ? logs[module] + (module !== "receive_push" ? "ms" : " sec") : result));
+			$(element).html((time !== -1 && time !== 0 ? logs[module] + "<span class='unit'>" + (module !== "receive_push" ? "ms" : " sec") + "</span>" : result));
 			
 			$(".time").not(".pass, .slow, .failed, .disabled").each(function() {
 				$(this).html('<span class="not-applicable">N/A</span>');
 			});
 			
 			if(result === "failed") {
-				$(element).attr("title", getError(module));
+				var error = typeof getError(module) === "object" ? JSON.stringify(getError(module)) : getError(module);
+				$(element).attr("title", error);
 			}
 		}
 	});
-	if(isLatest) {
-		$("#lastchecked").text("Last checked " + moment.utc(logs.created_at, "X").fromNow());
-	} else {
-		$("#lastchecked").text("Showing status for " + moment.utc(logs.created_at, "X").format("ddd DD MMM YYYY"));
+	if(!idPrefix && isLatest) {
+		time_of_latest_check = moment(logs.created_at, "X").format("HH:mm");
+		$("#lastchecked span").text(moment.utc(logs.created_at, "X").fromNow());
+	} else if( !idPrefix ) {
+		time_of_latest_check = moment(logs.created_at, "X").format("DD/MM/YY");
+		$("#lastchecked span").text(moment.utc(logs.created_at, "X").format("ddd DD MMM YYYY"));
 	}
 	$(".loading").css("opacity", "0");
 	setTimeout(function() { $(".loading").css("display", "none"); }, 250)
@@ -238,7 +332,7 @@ function showMessage(message) {
 	var element = $("<div id='modalMessage'></div>");
 	$("body").addClass("modalopen").append(element);
 	element.html(message);
-	setTimeout(function(){element.remove(); $("body").removeClass("modalopen"); location.hash = ""}, 2000);
+	setTimeout(function(){element.remove(); $("body").removeClass("modalopen"); location.hash = "";}, 2000);
 }
 function graphModule(module) {
 	var plotData = getGraphData(module);
