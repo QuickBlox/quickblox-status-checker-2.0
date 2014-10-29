@@ -29,3 +29,16 @@ For the latter, start with
 
     node check.js --go
 
+### One more thing
+
+You have to change one line in `node_modules/quickblox/js/quickblox.js` on line 71 from:
+
+    module.exports = (typeof window === 'undefined') ? new QuickBlox() : QuickBlox;
+
+to
+
+    module.exports = QuickBlox;
+
+So that we can create multiple QB()’s.
+
+Given that this is our SDK, we will sort this out ASAP :-)
