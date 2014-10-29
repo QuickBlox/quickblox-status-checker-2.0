@@ -1,6 +1,6 @@
 {
   "name": "StatusChecker",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Check the status of Quickblox data and chat modules",
   "main": "server.js",
   "scripts": {
