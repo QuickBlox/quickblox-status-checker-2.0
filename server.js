@@ -1,15 +1,13 @@
 var fs        = require('fs'),
     util      = require('util'),
     spawn     = require('child_process').spawn,
-    QuickBlox = require('quickblox').QuickBlox,
+    QB        = require('quickblox'),
     cronJob   = require('cron').CronJob,
     moment    = require("moment"),
     Check     = require('./check'),
     config    = require('./config'),
     express   = require('express'),
     app       = express();
-
-var QB = new QuickBlox();
 
 var port = 7828,
 	firstCheck = 1403686813,
@@ -356,12 +354,12 @@ function getStatus(options, callback) {
 			    } else {
 			    			    	
 		    		var params = {
-			    		"sort_desc": "_id",
-						"limit": 350,
-						"output[exclude]": "_id,_parent_id,user_id,updated_at,server",
-						"server": options.instance,
-						"created_at[gte]": options.from,
-						"created_at[lte]": options.until
+  			    	"sort_desc": "_id",
+  						"limit": 350,
+  						"output[exclude]": "_id,_parent_id,user_id,updated_at,server",
+  						"server": options.instance,
+  						"created_at[gte]": options.from,
+  						"created_at[lte]": options.until
 		    		};
 		    	
 		    		QB.data.list("Push", params, function(error, push) {
