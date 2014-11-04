@@ -43,7 +43,7 @@ var EventEmitter = require('events').EventEmitter;
 var util = require('util');
 var qbox = require('qbox');
 var colors = require('colors');
-var config = require('config');
+var config = require('./config');
 
 var STATUS = {
     AWAY: "away",

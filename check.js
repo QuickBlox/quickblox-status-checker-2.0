@@ -5,7 +5,7 @@ var config      = require("./config"),
     helpers     = require("./helpers"),
     alert       = require("./alerts"),
     util        = require("util"),
-    QuickBlox   = require("quickblox"),
+    QuickBlox   = require("quickblox").QuickBlox,
     request     = require("request"),
     chance      = require("chance").Chance(),
     colors      = require("colors");
@@ -1011,28 +1011,32 @@ if (process.argv[2] === "--go") {
 }
 
 if (process.argv[2] === "--go-with-test") {
-    instances = config.testInstance;
-    start();
+    var instance = config.testInstance;
+    
+    var checker = new Check(instance, function(data) {
+        var name = instance.name;
+        console.log("Finished".green);
+        console.log("Errors: %d", data.errors.length);
+        console.log("Total: %d", data.total);
+        process.exit();
+    });
 }
 
 if (process.argv[2] === "-i" && process.argv[3] !== "") {
 
     var index = 0, i, len = config.instances.length;
-    for(i = 0; i < len; ++i) {
+    for (i = 0; i < len; ++i) {
         if(config.instances[i].name.toLowerCase() === process.argv[3].toLowerCase()) index = i;
     }
 
     var instance = config.instances[index];
-    start(instance, function() {
+    
+    var checker = new Check(instance, function(data) {
         var name = instance.name;
         console.log("Finished".green);
-        alert(name, { latency: latency[name], errors: error_log[name] || [] }, function(error, response) {
-            if(!error) {
-                console.log("email sent");
-            } else {
-                console.log("email not sent");
-            }
-        });
+        console.log("Errors: %d", data.errors.length);
+        console.log("Total: %d", data.total);
+        process.exit();
     });
 }
 
