@@ -1,13 +1,13 @@
-var fs 			  = require('fs'),
-    util		  = require('util'),
-    spawn 		= require('child_process').spawn,
+var fs        = require('fs'),
+    util      = require('util'),
+    spawn     = require('child_process').spawn,
     QuickBlox = require('quickblox').QuickBlox,
-    cronJob		= require('cron').CronJob,
-    moment 		= require("moment"),
-    Check		  = require('./check'),
-    config	 	= require('./config'),
-    express 	= require('express'),
-    app 		  = express();
+    cronJob   = require('cron').CronJob,
+    moment    = require("moment"),
+    Check     = require('./check'),
+    config    = require('./config'),
+    express   = require('express'),
+    app       = express();
 
 var QB = new QuickBlox();
 
