@@ -16,7 +16,7 @@ Quickblox Status Checker 2.1
 
 - `alerts.js` - Sends an email when some stats failed using AWS SES.
 
-- `config.js` - Should be called `42.js`.
+- `config.js` - Should be called `42.js`. Contains all the answers to life. And some Quickblox configuration. (Same thing really)
 
 
 ### Running a check
@@ -28,17 +28,3 @@ Add an instance to config.testInstance or to config.instances. For the former, s
 For the latter, start with 
 
     node check.js --go
-
-### One more thing
-
-You have to change one line in `node_modules/quickblox/js/quickblox.js` on line 71 from:
-
-    module.exports = (typeof window === 'undefined') ? new QuickBlox() : QuickBlox;
-
-to
-
-    module.exports = QuickBlox;
-
-So that we can create multiple QB()’s.
-
-Given that this is our SDK, we will sort this out ASAP :-)
